@@ -1,0 +1,9 @@
+chromadb==0.5.23
+langchain-community==0.3.14
+langchain-text-splitters==0.3.5
+
+# Planned next steps (not required for RAG ingest/query):
+# langgraph==0.2.57
+# pydantic-ai==0.0.24
+
+
