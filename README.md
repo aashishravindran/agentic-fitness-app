@@ -2,6 +2,10 @@
 
 ## Local Fitness RAG + Trainer Agent
 
+> 🚀 **New to the project? Start with [QUICKSTART.md](./QUICKSTART.md) for step-by-step setup!**
+>
+> 📖 **For comprehensive documentation, see [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)**
+
 The system includes:
 
 - **RAG System**: Ingesting creator markdown files, chunking + embedding locally via Ollama, persisting to ChromaDB
@@ -27,15 +31,29 @@ The system includes:
    ```
 
 3. **Set Gemini API key** (recommended) or use Ollama/OpenAI:
+   
+   **Option A: Use .env file (Recommended)**
    ```bash
-   # Gemini (recommended - free tier available)
+   # Copy the example file
+   cp .env.example .env
+   
+   # Edit .env and add your API key
+   # GOOGLE_API_KEY=your-google-api-key-here
+   ```
+   
+   **Option B: Environment variables**
+   ```bash
    export GOOGLE_API_KEY="your-google-api-key-here"
    # Or: export GEMINI_API_KEY="your-key-here"
+   ```
    
-   # Alternative: OpenAI
+   **Alternative: OpenAI**
+   ```bash
    export OPENAI_API_KEY="sk-your-key-here"
+   ```
    
-   # Alternative: Ollama (local, no API key needed)
+   **Alternative: Ollama (local, no API key needed)**
+   ```bash
    # Just make sure Ollama is running
    ```
    
@@ -63,6 +81,50 @@ The system includes:
   ```
 
   See `TESTING.md` for detailed testing instructions and troubleshooting.
+
+## Hierarchical Multi-Agent System
+
+The system now includes a **Supervisor** that routes to **4 specialist workers**:
+
+- **Iron Worker**: Strength training (push/pull/legs)
+- **Yoga Worker**: Mobility (spine/hips/shoulders)
+- **HIIT Worker**: Cardio (cardio/cns)
+- **Kickboxing Worker**: Combat fitness (coordination/speed)
+
+**Features**:
+- Fatigue decay based on time since last session
+- Automatic persona switching
+- Fatigue complaint mapping
+- Persistent state with SqliteSaver
+
+**Chat CLI** (natural language → Supervisor → agents → workout):
+```bash
+python main.py chat "I want a strength workout, my legs are a bit sore"
+python main.py chat "Give me a yoga flow, my hips are tight"
+python main.py chat "HIIT session please" --persona hiit
+```
+Optional: `--persona`, `--goal`, `--fatigue`, `--json`.
+
+**How to call the Supervisor**:
+- **Directly** (routing + fatigue only): `from agents.supervisor import supervisor_node` → `supervisor_node(state)`
+- **Full workflow** (Supervisor → Decay → Worker → workout): `from graph import run_workout` → `run_workout(...)`
+
+**Example**: `python examples/call_supervisor.py`
+
+**Test the full system**:
+```bash
+python test_graph.py
+```
+
+See **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** for details.
+
+## Documentation
+
+- **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** - Comprehensive project overview, architecture, and trainer node deep dive
+- **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** - Multi-agent system implementation guide
+- **[TESTING.md](./TESTING.md)** - Testing guide and troubleshooting
+- **[GEMINI_SETUP.md](./GEMINI_SETUP.md)** - Gemini API setup instructions
+- **[FITNESS_RAG_SPEC.md](./FITNESS_RAG_SPEC.md)** - Original technical specification
 
 ### Project Structure
 

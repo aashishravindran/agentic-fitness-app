@@ -3,8 +3,8 @@ langchain-community==0.3.14
 langchain-text-splitters==0.3.5
 pydantic-ai==0.0.24
 google-generativeai>=0.3.0  # For Gemini support
-
-# Planned next steps (not required for RAG ingest/query):
-# langgraph==0.2.57
+langgraph>=0.2.57
+langgraph-checkpoint-sqlite>=2.0.0  # SqliteSaver: from langgraph.checkpoint.sqlite
+python-dotenv>=1.0.0  # For .env file support
 
 

@@ -1,8 +1,12 @@
 creator_db/
 .env
+.env.local
+.env.*.local
 __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+checkpoints/
+*.db
 .venv/
 

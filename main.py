@@ -3,10 +3,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 
+# Ensure project root is on path (fixes "No module named 'config'" when run from other dirs)
+_ROOT = Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+import config  # Load .env before any agents
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from agents.trainer import trainer_node
+from graph import run_workout
 from ingest import ingest
 from state import FitnessState
 
@@ -117,8 +125,144 @@ def cmd_train(args: argparse.Namespace) -> None:
         print("3. Is the creator_db directory populated?")
 
 
+def _parse_fatigue(s: str) -> dict:
+    """Parse 'legs:0.8,push:0.2' into {'legs': 0.8, 'push': 0.2}."""
+    out = {}
+    if not s:
+        return out
+    for pair in s.split(","):
+        if ":" in pair:
+            k, v = pair.split(":", 1)
+            out[k.strip()] = float(v.strip())
+    return out
+
+
+def _print_workout(workout: dict, *, json_out: bool = False) -> None:
+    """Display workout from any worker (iron, yoga, hiit, kickboxing)."""
+    if json_out:
+        print(json.dumps(workout, indent=2))
+        return
+
+    # Common fields
+    print("=" * 70)
+    print("WORKOUT")
+    print("=" * 70)
+    focus = workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute")
+    if focus:
+        print(f"\nFocus: {focus}")
+    if workout.get("total_duration"):
+        print(f"Duration: {workout['total_duration']}")
+    if workout.get("fatigue_adaptations"):
+        print(f"\nFatigue adaptations: {workout['fatigue_adaptations']}")
+    if workout.get("overall_rationale"):
+        print(f"\nRationale: {workout['overall_rationale']}")
+
+    # Iron / HIIT / Kickboxing: exercises
+    if "exercises" in workout and workout["exercises"]:
+        exs = workout["exercises"]
+        print("\n" + "-" * 70)
+        print("EXERCISES")
+        print("-" * 70)
+        for i, e in enumerate(exs, 1):
+            name = e.get("exercise_name", "?")
+            sets = e.get("sets")
+            reps = e.get("reps")
+            tempo = e.get("tempo_notes", "")
+            just = e.get("iron_justification") or e.get("inferno_justification") or e.get("strikeforce_justification", "")
+            work = e.get("work_duration")
+            rest_dur = e.get("rest_duration")
+            zone = e.get("intensity_zone") or e.get("intensity", "")
+            rounds = e.get("rounds")
+            print(f"\n{i}. {name}")
+            if sets is not None and reps:
+                print(f"   Sets: {sets} | Reps: {reps}")
+            if work and rest_dur:
+                print(f"   Work: {work} | Rest: {rest_dur}")
+            if zone:
+                print(f"   Intensity: {zone}")
+            if rounds is not None:
+                print(f"   Rounds: {rounds}")
+            if tempo:
+                print(f"   Tempo: {tempo}")
+            if just:
+                print(f"   Why: {just}")
+
+    # Yoga: poses
+    if "poses" in workout and workout["poses"]:
+        print("\n" + "-" * 70)
+        print("POSES")
+        print("-" * 70)
+        for i, p in enumerate(workout["poses"], 1):
+            name = p.get("pose_name", "?")
+            dur = p.get("duration", "")
+            focus_p = p.get("focus_area", "")
+            just = p.get("zen_justification", "")
+            print(f"\n{i}. {name}")
+            if dur:
+                print(f"   Duration: {dur}")
+            if focus_p:
+                print(f"   Focus: {focus_p}")
+            if just:
+                print(f"   Why: {just}")
+
+    print("\n" + "=" * 70)
+
+
+def cmd_chat(args: argparse.Namespace) -> None:
+    """CLI: natural language query → Supervisor → workers → workout."""
+    query = (getattr(args, "query", "") or "").strip()
+    if not query:
+        print("Usage: python main.py chat \"<your request>\"")
+        print("Example: python main.py chat \"I want a strength workout, my legs are a bit sore\"")
+        print("Example: python main.py chat \"Give me a yoga flow, my hips are tight\"")
+        print("Example: python main.py chat \"HIIT session please\" --persona hiit")
+        return
+
+    defaults = {
+        "legs": 0.2, "push": 0.2, "pull": 0.2,
+        "spine": 0.1, "hips": 0.1, "shoulders": 0.1,
+        "cardio": 0.1, "cns": 0.1,
+        "coordination": 0.1, "speed": 0.1, "endurance": 0.1,
+    }
+    fatigue_scores = {**defaults, **_parse_fatigue(getattr(args, "fatigue", "") or "")}
+    persona = args.persona
+    goal = args.goal
+    user_id = args.user_id
+
+    messages = [{"role": "user", "content": query}]
+
+    print("=" * 70)
+    print("Fitness CLI — Supervisor + Agents")
+    print("=" * 70)
+    print(f"\nYou: {query}")
+    print(f"\nPersona: {persona} | Goal: {goal}")
+    print("\nRouting and generating workout...\n")
+
+    try:
+        result = run_workout(
+            user_id=user_id,
+            persona=persona,
+            goal=goal,
+            fatigue_scores=fatigue_scores,
+            messages=messages,
+        )
+        workout = result.get("daily_workout")
+        if not workout:
+            print("No workout generated. Supervisor may have routed to 'end'.")
+            return
+        _print_workout(workout, json_out=args.json)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\nTroubleshooting:")
+        print("1. Run 'python main.py ingest' first")
+        print("2. Set GOOGLE_API_KEY (or OPENAI_API_KEY) in .env")
+        print("3. pip install -r requirements.txt")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local Fitness RAG (ingest + query).")
+    parser = argparse.ArgumentParser(description="Fitness RAG + Supervisor CLI.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_ingest = sub.add_parser("ingest", help="Ingest /creators into local Chroma")
@@ -164,6 +308,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--user-id", default="user_123", help="User ID")
     p_train.add_argument("--json", action="store_true", help="Output workout as JSON")
     p_train.set_defaults(func=cmd_train)
+
+    p_chat = sub.add_parser(
+        "chat",
+        help="Natural language query → Supervisor routes to agents, returns workout",
+    )
+    p_chat.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Your request, e.g. 'I want a yoga session, my hips are tight'",
+    )
+    p_chat.add_argument(
+        "--persona",
+        default="iron",
+        choices=["iron", "yoga", "hiit", "kickboxing"],
+        help="Default persona if not inferred from query",
+    )
+    p_chat.add_argument("--goal", default="Build strength and improve fitness", help="Fitness goal")
+    p_chat.add_argument(
+        "--fatigue",
+        default="",
+        help="Fatigue scores, e.g. 'legs:0.7,push:0.2'",
+    )
+    p_chat.add_argument("--user-id", default="cli_user", help="User ID")
+    p_chat.add_argument("--json", action="store_true", help="Output workout as JSON")
+    p_chat.set_defaults(func=cmd_chat)
 
     return parser
 

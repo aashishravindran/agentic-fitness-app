@@ -13,15 +13,28 @@ The Trainer Agent now uses **Google Gemini** as the default LLM (instead of Open
 
 ### 2. Set the API Key
 
+**Recommended: Use .env file**
+
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your API key:
+   ```bash
+   GOOGLE_API_KEY=your-google-api-key-here
+   ```
+
+3. The system will automatically load it (no need to export)
+
+**Alternative: Environment variables**
+
 ```bash
-# Option A: Environment variable (recommended)
+# Option A: Export in terminal
 export GOOGLE_API_KEY="your-api-key-here"
 
 # Option B: Alternative name (also works)
 export GEMINI_API_KEY="your-api-key-here"
-
-# Option C: Add to .env file (if using python-dotenv)
-echo "GOOGLE_API_KEY=your-api-key-here" >> .env
 ```
 
 ### 3. Optional: Choose Model

@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Load .env file if it exists
+import config  # noqa: F401
+
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
@@ -110,9 +113,9 @@ def get_llm_model():
     """
     # Check for Gemini/Google API key (priority)
     google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    # Default to gemini-1.5-flash (most compatible with v1beta API)
+    # Default to gemini-flash-latest (works with v1beta API)
     # Will auto-fallback to other models if this one fails
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     
     # Check for OpenAI API key
     openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -123,13 +126,16 @@ def get_llm_model():
 
     # Priority 1: Gemini/Google
     if google_api_key and GoogleModel:
-        # Try models in order of preference (v1beta API compatible)
+        # Try newer model names that work with v1beta API
+        # Based on pydantic-ai documentation, these are the available models
         models_to_try = [
-            gemini_model,  # User's preferred model
-            "gemini-1.5-flash",  # Fast, widely available
-            "gemini-1.5-pro",  # More capable
+            gemini_model,  # User's preferred model (if valid)
+            "gemini-flash-latest",  # Latest flash model
+            "gemini-2.0-flash",  # Gemini 2.0 flash
+            "gemini-2.5-flash",  # Gemini 2.5 flash
+            "gemini-2.5-pro",  # Gemini 2.5 pro
+            "gemini-1.5-pro",  # Fallback to 1.5 pro
             "gemini-1.0-pro",  # Older stable version
-            "gemini-pro",  # Legacy name
         ]
         
         last_error = None
