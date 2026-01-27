@@ -52,8 +52,15 @@ def decay_node(state: FitnessState) -> Dict:
         # Ensure it doesn't go below 0
         decayed_scores[muscle_group] = max(0.0, new_fatigue)
     
+    # Check if a week has passed (168 hours = 7 days)
+    # If so, reset the weekly workout counter
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    if hours_passed >= 168:  # 7 days
+        workouts_completed = 0
+    
     # Update state
     return {
         "fatigue_scores": decayed_scores,
         "last_session_timestamp": current_time,
+        "workouts_completed_this_week": workouts_completed,  # Reset if week passed
     }

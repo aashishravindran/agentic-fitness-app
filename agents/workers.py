@@ -211,11 +211,15 @@ Generate a strength training workout focusing on push/pull/legs."""
     history = state.get("workout_history", [])
     history.append(workout_dict)
     
+    # Increment weekly workout counter
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
         "workout_history": history,  # Save updated history
+        "workouts_completed_this_week": workouts_completed + 1,  # Increment counter
     }
 
 
@@ -269,11 +273,15 @@ Generate a yoga practice focusing on spine/hips/shoulders."""
     history = state.get("workout_history", [])
     history.append(workout_dict)
     
+    # Increment weekly workout counter
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
         "workout_history": history,  # Save updated history
+        "workouts_completed_this_week": workouts_completed + 1,  # Increment counter
     }
 
 
@@ -327,11 +335,15 @@ Generate a HIIT workout focusing on cardio/cns systems."""
     history = state.get("workout_history", [])
     history.append(workout_dict)
     
+    # Increment weekly workout counter
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
         "workout_history": history,  # Save updated history
+        "workouts_completed_this_week": workouts_completed + 1,  # Increment counter
     }
 
 
@@ -385,9 +397,13 @@ Generate a kickboxing workout focusing on coordination/speed/power/endurance."""
     history = state.get("workout_history", [])
     history.append(workout_dict)
     
+    # Increment weekly workout counter
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
         "workout_history": history,  # Save updated history
+        "workouts_completed_this_week": workouts_completed + 1,  # Increment counter
     }

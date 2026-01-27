@@ -51,8 +51,8 @@ class FatigueUpdate(BaseModel):
 class SupervisorDecision(BaseModel):
     """Supervisor's routing decision."""
     
-    next_node: Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "end"] = Field(
-        description="Which worker node to route to, or 'end' to finish"
+    next_node: Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"] = Field(
+        description="Which worker node to route to, 'recovery_worker' for rest/recovery, or 'end' to finish"
     )
     selected_persona: Literal["iron", "yoga", "hiit", "kickboxing"] = Field(
         description="The persona/user's training style preference"
@@ -62,7 +62,7 @@ class SupervisorDecision(BaseModel):
         description="Updates to fatigue scores based on user complaints (e.g., 'my shins hurt' -> [{'muscle_group': 'legs', 'fatigue_value': 0.7}])"
     )
     reasoning: str = Field(
-        description="Brief explanation of routing decision"
+        description="Brief explanation of routing decision, including safety overrides if applicable"
     )
 
 
@@ -112,7 +112,7 @@ def get_supervisor_model():
     raise ValueError("No LLM model available. Set GOOGLE_API_KEY, OPENAI_API_KEY, or use Ollama.")
 
 
-SUPERVISOR_PROMPT = """You are the Supervisor of a multi-agent fitness coaching system.
+SUPERVISOR_PROMPT = """You are the Supervisor and Safety Governor of a multi-agent fitness coaching system.
 
 Your role:
 1. **Detect Persona Switching**: If the user wants to switch training styles (e.g., "I want to do yoga today"), update selected_persona.
@@ -121,18 +121,27 @@ Your role:
    - "shoulders are tight" → [{"muscle_group": "shoulders", "fatigue_value": 0.6}, {"muscle_group": "spine", "fatigue_value": 0.4}]
    - "I'm exhausted" / "CNS is fried" → [{"muscle_group": "cns", "fatigue_value": 0.8}, {"muscle_group": "cardio", "fatigue_value": 0.6}]
    - "hips are tight" → [{"muscle_group": "hips", "fatigue_value": 0.7}, {"muscle_group": "spine", "fatigue_value": 0.5}]
-3. **Route to Workers**: Based on selected_persona, route to the correct specialist:
+3. **Safety Override (CRITICAL)**: 
+   - If ANY fatigue score exceeds the fatigue_threshold (default 0.8), you MUST route to "recovery_worker" regardless of user request
+   - This prevents overtraining and injury
+   - Only yoga_worker or recovery_worker are safe when fatigue is critical
+4. **Frequency Block**: 
+   - If workouts_completed_this_week >= max_workouts_per_week, route to "end" with reasoning explaining the weekly limit has been reached
+5. **Route to Workers**: Based on selected_persona (if safety allows):
    - "iron" → iron_worker (strength training: push/pull/legs)
    - "yoga" → yoga_worker (mobility: spine/hips/shoulders)
    - "hiit" → hiit_worker (cardio: cardio/cns)
    - "kickboxing" → kb_worker (coordination: coordination/speed)
+   - "recovery_worker" → For rest days, active recovery, or when fatigue is too high
 
 **Fatigue Mapping Between Personas:**
 - Iron's "legs" fatigue → Yoga's "hips/spine" restriction
 - Iron's "push" fatigue → Yoga's "shoulders" restriction
 - HIIT's "cardio" fatigue → All personas should reduce intensity
 
-Always provide reasoning for your routing decision."""
+**Safety First**: Always prioritize user safety over intensity. If in doubt, route to recovery_worker.
+
+Always provide reasoning for your routing decision, especially when safety overrides occur."""
 
 
 _supervisor_agent: Agent | None = None
@@ -152,13 +161,14 @@ def get_supervisor_agent() -> Agent:
 
 def supervisor_node(state: FitnessState) -> Dict:
     """
-    Supervisor node: Entry point for user interactions.
+    Supervisor node: Entry point for user interactions with Safety Governor logic.
     
     This is the primary interface for users. It:
     1. Processes user messages and conversation
     2. Detects persona switching
     3. Maps fatigue complaints to scores
-    4. Routes to appropriate workers
+    4. Enforces safety overrides (fatigue threshold, weekly limits)
+    5. Routes to appropriate workers
     
     Args:
         state: FitnessState with messages and current persona
@@ -170,6 +180,31 @@ def supervisor_node(state: FitnessState) -> Dict:
     messages = state.get("messages", [])
     current_persona = state.get("selected_persona", "iron")
     fatigue_scores = state.get("fatigue_scores", {})
+    fatigue_threshold = state.get("fatigue_threshold", 0.8)
+    max_workouts = state.get("max_workouts_per_week", 4)
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    
+    # SAFETY OVERRIDE 1: Frequency Block
+    # If user has reached weekly limit, end the session
+    if workouts_completed >= max_workouts:
+        return {
+            "next_node": "end",
+            "selected_persona": current_persona,
+            "selected_creator": current_persona,
+            "fatigue_scores": fatigue_scores,
+        }
+    
+    # SAFETY OVERRIDE 2: Fatigue Threshold
+    # If any fatigue score exceeds threshold, force recovery
+    max_fatigue = max(fatigue_scores.values()) if fatigue_scores else 0.0
+    if max_fatigue > fatigue_threshold:
+        # Force route to recovery_worker regardless of user request
+        return {
+            "next_node": "recovery_worker",
+            "selected_persona": current_persona,
+            "selected_creator": current_persona,
+            "fatigue_scores": fatigue_scores,
+        }
     
     # If no messages, use default routing based on persona
     if not messages:
@@ -192,17 +227,24 @@ def supervisor_node(state: FitnessState) -> Dict:
         for msg in messages[-5:]  # Last 5 messages for context
     ])
     
-    prompt = f"""You are the Supervisor, the entry point for user interactions.
+    prompt = f"""You are the Supervisor and Safety Governor, the entry point for user interactions.
 
 Current Persona: {current_persona}
 Current Fatigue Scores: {fatigue_scores}
+Fatigue Threshold: {fatigue_threshold} (if any score exceeds this, route to recovery_worker)
+Workouts Completed This Week: {workouts_completed}/{max_workouts}
 Recent Conversation:
 {conversation}
 
 Analyze the conversation and decide:
 1. Should the persona change based on user's request?
-2. Are there any fatigue complaints to map (e.g., "my legs hurt" → {{"legs": 0.7}})?
+2. Are there any fatigue complaints to map (e.g., "my legs hurt" → [{{"muscle_group": "legs", "fatigue_value": 0.7}}])?
 3. Which worker should handle this request?
+   - If user explicitly asks for rest/recovery, route to recovery_worker
+   - If fatigue is high but below threshold, consider recovery_worker
+   - Otherwise route to appropriate specialist worker
+
+SAFETY NOTE: If max fatigue > {fatigue_threshold}, you should route to recovery_worker (but this should already be handled by safety override).
 
 Return your routing decision."""
     

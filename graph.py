@@ -29,12 +29,13 @@ except ImportError:
 
 from agents.decay import decay_node
 from agents.history_analyzer import history_analysis_node
+from agents.recovery_worker import recovery_worker
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
 from state import FitnessState
 
 
-def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "end"]:
+def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"]:
     """Route to the next node based on supervisor's decision."""
     next_node = state.get("next_node", "end")
     return next_node
@@ -62,6 +63,7 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_node("yoga_worker", yoga_worker)
     workflow.add_node("hiit_worker", hiit_worker)
     workflow.add_node("kb_worker", kb_worker)
+    workflow.add_node("recovery_worker", recovery_worker)  # Recovery and rest days
     
     # Set entry point - Supervisor handles all user interactions
     workflow.set_entry_point("supervisor")
@@ -77,6 +79,7 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
             "yoga_worker": "yoga_worker",
             "hiit_worker": "hiit_worker",
             "kb_worker": "kb_worker",
+            "recovery_worker": "recovery_worker",
             "end": END,
         },
     )
@@ -86,6 +89,7 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_edge("yoga_worker", END)
     workflow.add_edge("hiit_worker", END)
     workflow.add_edge("kb_worker", END)
+    workflow.add_edge("recovery_worker", END)
     
     # Compile graph with persistence if available
     if enable_persistence and SQLITE_AVAILABLE and SqliteSaver:
@@ -129,7 +133,7 @@ def run_workout(
     """
     import time
     
-    # Build initial state
+    # Build initial state with safety defaults
     initial_state: FitnessState = {
         "user_id": user_id,
         "selected_persona": persona,
@@ -138,6 +142,9 @@ def run_workout(
         "fatigue_scores": fatigue_scores,
         "last_session_timestamp": time.time(),
         "workout_history": [],  # Will be loaded from persistence if available
+        "max_workouts_per_week": 4,  # Default: 4 workouts per week
+        "workouts_completed_this_week": 0,  # Will be loaded from persistence
+        "fatigue_threshold": 0.8,  # Default: 0.8 (80% fatigue triggers recovery)
         "messages": messages or [],
         "active_philosophy": None,
         "retrieved_rules": [],
@@ -155,24 +162,48 @@ def run_workout(
     # Each user_id maps to a unique thread_id, allowing per-user state isolation
     config = {"configurable": {"thread_id": user_id}}
     
-    # Try to get existing state using LangGraph's get_state method
-    # This properly handles checkpoint metadata
+    # Try to load existing state using db_utils (safer than get_state)
+    # This avoids triggering LangGraph's checkpoint loading which might be corrupted
     try:
-        existing_state_result = app.get_state(config)
-        if existing_state_result and existing_state_result.values:
-            existing_state = existing_state_result.values
-            # Preserve workout_history from persisted state
-            if existing_state.get("workout_history"):
-                initial_state["workout_history"] = existing_state["workout_history"]
-            # Merge fatigue_scores: keep persisted ones, update with provided ones
-            if existing_state.get("fatigue_scores"):
-                merged_fatigue = {**existing_state["fatigue_scores"], **fatigue_scores}
-                initial_state["fatigue_scores"] = merged_fatigue
+        if SQLITE_AVAILABLE and SqliteSaver:
+            from db_utils import get_user_state
+            existing_state = get_user_state(user_id, checkpoint_dir)
+            if existing_state:
+                # Preserve workout_history from persisted state
+                if existing_state.get("workout_history"):
+                    initial_state["workout_history"] = existing_state["workout_history"]
+                # Merge fatigue_scores: keep persisted ones, update with provided ones
+                if existing_state.get("fatigue_scores"):
+                    merged_fatigue = {**existing_state["fatigue_scores"], **fatigue_scores}
+                    initial_state["fatigue_scores"] = merged_fatigue
+                # Preserve safety settings from persisted state
+                if existing_state.get("max_workouts_per_week"):
+                    initial_state["max_workouts_per_week"] = existing_state["max_workouts_per_week"]
+                if existing_state.get("workouts_completed_this_week") is not None:
+                    initial_state["workouts_completed_this_week"] = existing_state["workouts_completed_this_week"]
+                if existing_state.get("fatigue_threshold"):
+                    initial_state["fatigue_threshold"] = existing_state["fatigue_threshold"]
     except Exception:
-        # If no existing state or error, continue with provided initial_state
+        # If loading fails, continue with provided initial_state
         pass
     
-    result = app.invoke(initial_state, config)
+    # Invoke the graph
+    # If checkpoint is corrupted, LangGraph will error - we'll handle it below
+    try:
+        result = app.invoke(initial_state, config)
+    except KeyError as e:
+        if "step" in str(e):
+            # Corrupted checkpoint - delete and retry
+            print(f"⚠️  Corrupted checkpoint detected. Deleting and retrying...")
+            try:
+                from db_utils import delete_user
+                delete_user(user_id, checkpoint_dir)
+                # Retry with fresh state
+                result = app.invoke(initial_state, config)
+            except Exception as retry_error:
+                raise Exception(f"Failed to recover from corrupted checkpoint: {retry_error}") from e
+        else:
+            raise
     
     return result
 

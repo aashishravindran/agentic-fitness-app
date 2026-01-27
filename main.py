@@ -19,6 +19,9 @@ from db_utils import (
     list_users,
     view_user_state,
     update_user_fatigue,
+    update_workouts_completed,
+    update_max_workouts,
+    update_fatigue_threshold,
     clear_user_history,
     delete_user,
     export_user_state,
@@ -146,15 +149,29 @@ def _parse_fatigue(s: str) -> dict:
 
 
 def _print_workout(workout: dict, *, json_out: bool = False) -> None:
-    """Display workout from any worker (iron, yoga, hiit, kickboxing)."""
+    """Display workout from any worker (iron, yoga, hiit, kickboxing, recovery)."""
     if json_out:
         print(json.dumps(workout, indent=2))
         return
 
     # Common fields
     print("=" * 70)
-    print("WORKOUT")
+    # Check if this is a recovery plan
+    if workout.get("recovery_focus") or workout.get("permission_to_rest"):
+        print("RECOVERY PLAN")
+    else:
+        print("WORKOUT")
     print("=" * 70)
+    
+    # Recovery-specific fields
+    if workout.get("recovery_focus"):
+        print(f"\nRecovery Focus: {workout['recovery_focus']}")
+    if workout.get("permission_to_rest"):
+        print(f"\n💚 {workout['permission_to_rest']}")
+    if workout.get("step_goal"):
+        print(f"\nStep Goal: {workout['step_goal']} steps (NEAT activity)")
+    
+    # Regular workout fields
     focus = workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute")
     if focus:
         print(f"\nFocus: {focus}")
@@ -212,6 +229,27 @@ def _print_workout(workout: dict, *, json_out: bool = False) -> None:
                 print(f"   Focus: {focus_p}")
             if just:
                 print(f"   Why: {just}")
+    
+    # Recovery: activities
+    if "activities" in workout and workout["activities"]:
+        print("\n" + "-" * 70)
+        print("RECOVERY ACTIVITIES")
+        print("-" * 70)
+        for i, a in enumerate(workout["activities"], 1):
+            name = a.get("activity_name", "?")
+            activity_type = a.get("activity_type", "")
+            dur = a.get("duration", "")
+            intensity = a.get("intensity", "")
+            rationale = a.get("rationale", "")
+            print(f"\n{i}. {name}")
+            if activity_type:
+                print(f"   Type: {activity_type}")
+            if dur:
+                print(f"   Duration: {dur}")
+            if intensity:
+                print(f"   Intensity: {intensity}")
+            if rationale:
+                print(f"   Why: {rationale}")
 
     print("\n" + "=" * 70)
 
@@ -271,21 +309,35 @@ def cmd_chat(args: argparse.Namespace) -> None:
             print("No workout generated. Supervisor may have routed to 'end'.")
             return
         
-        # Show history info if available
+        # Show history and safety info
         history = result.get("workout_history", [])
+        workouts_completed = result.get("workouts_completed_this_week", 0)
+        max_workouts = result.get("max_workouts_per_week", 4)
+        fatigue_threshold = result.get("fatigue_threshold", 0.8)
+        
         if history:
             print(f"📊 Workout History: {len(history)} previous workout(s)")
             if len(history) > 1:
                 print(f"   (Previous workout analyzed for fatigue adjustments)")
-            print()
+        
+        print(f"📅 Weekly Progress: {workouts_completed}/{max_workouts} workouts completed")
+        if workouts_completed >= max_workouts:
+            print("   ⚠️  Weekly limit reached - rest recommended")
+        print()
         
         _print_workout(workout, json_out=args.json)
         
-        # Show updated fatigue if history was applied
+        # Show updated fatigue and safety warnings
         final_fatigue = result.get("fatigue_scores", {})
+        max_fatigue = max(final_fatigue.values()) if final_fatigue else 0.0
         high_fatigue = {k: v for k, v in final_fatigue.items() if v > 0.5}
+        
         if high_fatigue:
             print(f"\n⚠️  Current Fatigue Levels: {', '.join([f'{k}: {v:.2f}' for k, v in high_fatigue.items()])}")
+        
+        if max_fatigue > fatigue_threshold:
+            print(f"\n🚨 SAFETY ALERT: Max fatigue ({max_fatigue:.2f}) exceeds threshold ({fatigue_threshold:.2f})")
+            print("   Recovery or rest is strongly recommended before next training session.")
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
@@ -323,6 +375,27 @@ def cmd_db(args: argparse.Namespace) -> None:
             view_user_state(args.user_id)
         else:
             print(f"❌ User '{args.user_id}' not found")
+    
+    elif args.db_cmd == "update-workouts":
+        if update_workouts_completed(args.user_id, args.count):
+            print(f"✅ Updated workouts_completed_this_week to {args.count} for {args.user_id}")
+            view_user_state(args.user_id)
+        else:
+            print(f"❌ User '{args.user_id}' not found")
+    
+    elif args.db_cmd == "update-max-workouts":
+        if update_max_workouts(args.user_id, args.max):
+            print(f"✅ Updated max_workouts_per_week to {args.max} for {args.user_id}")
+            view_user_state(args.user_id)
+        else:
+            print(f"❌ User '{args.user_id}' not found")
+    
+    elif args.db_cmd == "update-threshold":
+        if update_fatigue_threshold(args.user_id, args.threshold):
+            print(f"✅ Updated fatigue_threshold to {args.threshold} for {args.user_id}")
+            view_user_state(args.user_id)
+        else:
+            print(f"❌ User '{args.user_id}' not found or invalid threshold")
     
     elif args.db_cmd == "clear-history":
         if clear_user_history(args.user_id):
@@ -437,6 +510,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_db_fatigue = db_sub.add_parser("update-fatigue", help="Update user fatigue scores")
     p_db_fatigue.add_argument("user_id", help="User ID")
     p_db_fatigue.add_argument("fatigue", help="Fatigue scores, e.g. 'legs:0.5,push:0.3'")
+    
+    p_db_workouts = db_sub.add_parser("update-workouts", help="Update workouts_completed_this_week")
+    p_db_workouts.add_argument("user_id", help="User ID")
+    p_db_workouts.add_argument("count", type=int, help="Number of workouts completed this week")
+    
+    p_db_max = db_sub.add_parser("update-max-workouts", help="Update max_workouts_per_week")
+    p_db_max.add_argument("user_id", help="User ID")
+    p_db_max.add_argument("max", type=int, help="Maximum workouts per week")
+    
+    p_db_threshold = db_sub.add_parser("update-threshold", help="Update fatigue_threshold")
+    p_db_threshold.add_argument("user_id", help="User ID")
+    p_db_threshold.add_argument("threshold", type=float, help="Fatigue threshold (0.0 to 1.0, default: 0.8)")
     
     p_db_clear = db_sub.add_parser("clear-history", help="Clear workout history for user")
     p_db_clear.add_argument("user_id", help="User ID")

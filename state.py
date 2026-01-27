@@ -15,6 +15,11 @@ class FitnessState(TypedDict):
     last_session_timestamp: float  # Unix timestamp of last session
     workout_history: List[Dict]  # Stores previous workout JSONs for history-based fatigue
     
+    # Safety & Frequency Constraints
+    max_workouts_per_week: int  # User's target frequency (default: 4)
+    workouts_completed_this_week: int  # Counter for sessions in current period
+    fatigue_threshold: float  # Score at which recovery becomes mandatory (default: 0.8)
+    
     # Context
     messages: List[Dict[str, str]]  # Conversation history
     active_philosophy: Optional[str]  # Context pulled from RAG
