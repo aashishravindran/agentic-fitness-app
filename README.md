@@ -120,8 +120,11 @@ See **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** for details.
 
 ## Documentation
 
-- **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** - Comprehensive project overview, architecture, and trainer node deep dive
+- **[PITCH_DECK.md](./PITCH_DECK.md)** - 🎯 **Pitch deck for non-technical audiences - features, benefits, and roadmap**
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - ⭐ **Complete system architecture, components, and usage guide**
+- **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** - Comprehensive project overview and trainer node deep dive
 - **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** - Multi-agent system implementation guide
+- **[QUICKSTART.md](./QUICKSTART.md)** - Step-by-step setup and quick start guide
 - **[TESTING.md](./TESTING.md)** - Testing guide and troubleshooting
 - **[GEMINI_SETUP.md](./GEMINI_SETUP.md)** - Gemini API setup instructions
 - **[FITNESS_RAG_SPEC.md](./FITNESS_RAG_SPEC.md)** - Original technical specification
