@@ -4,14 +4,17 @@ LangGraph Workflow for Hierarchical Multi-Agent Fitness System
 Flow:
 1. Supervisor Node (entry point - handles user interactions, routing decision)
 2. Decay Node (fatigue decay based on time - runs automatically)
-3. Worker Node (specialized workout generation)
-4. End
+3. History Analysis Node (applies fatigue based on previous workout)
+4. Worker Node (specialized workout generation)
+5. End
 
 The Supervisor is the primary entry point for all user interactions.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Literal
 
 from langgraph.graph import END, StateGraph
@@ -25,6 +28,7 @@ except ImportError:
     SQLITE_AVAILABLE = False
 
 from agents.decay import decay_node
+from agents.history_analyzer import history_analysis_node
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
 from state import FitnessState
@@ -36,12 +40,13 @@ def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_
     return next_node
 
 
-def build_graph(checkpoint_dir: str = "checkpoints") -> StateGraph:
+def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = True):
     """
-    Build the LangGraph workflow.
+    Build the LangGraph workflow with optional persistence.
     
     Args:
         checkpoint_dir: Directory for SqliteSaver persistence
+        enable_persistence: Whether to enable SQLite persistence
     
     Returns:
         Compiled StateGraph ready to run
@@ -52,6 +57,7 @@ def build_graph(checkpoint_dir: str = "checkpoints") -> StateGraph:
     # Add nodes
     workflow.add_node("supervisor", supervisor_node)  # Entry point for user interactions
     workflow.add_node("decay", decay_node)  # Runs automatically after supervisor
+    workflow.add_node("history_analysis", history_analysis_node)  # Apply history-based fatigue
     workflow.add_node("iron_worker", iron_worker)
     workflow.add_node("yoga_worker", yoga_worker)
     workflow.add_node("hiit_worker", hiit_worker)
@@ -60,10 +66,11 @@ def build_graph(checkpoint_dir: str = "checkpoints") -> StateGraph:
     # Set entry point - Supervisor handles all user interactions
     workflow.set_entry_point("supervisor")
     
-    # Flow: Supervisor (processes user) → Decay (updates fatigue) → Route to worker
+    # Flow: Supervisor → Decay → History Analysis → Route to worker
     workflow.add_edge("supervisor", "decay")
+    workflow.add_edge("decay", "history_analysis")
     workflow.add_conditional_edges(
-        "decay",
+        "history_analysis",  # Route from history analysis
         route_after_supervisor,  # Route based on supervisor's next_node decision
         {
             "iron_worker": "iron_worker",
@@ -80,11 +87,20 @@ def build_graph(checkpoint_dir: str = "checkpoints") -> StateGraph:
     workflow.add_edge("hiit_worker", END)
     workflow.add_edge("kb_worker", END)
     
-    # Compile graph
-    # Note: SqliteSaver requires context manager usage, which is complex for long-lived apps
-    # For now, we compile without persistence - the graph works fine without it
-    # State persistence can be added later by managing SqliteSaver context at a higher level
-    app = workflow.compile()
+    # Compile graph with persistence if available
+    if enable_persistence and SQLITE_AVAILABLE and SqliteSaver:
+        # Create checkpoint directory
+        Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Create SQLite connection for persistence
+        db_path = Path(checkpoint_dir) / "checkpoints.db"
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        memory = SqliteSaver(conn)
+        
+        app = workflow.compile(checkpointer=memory)
+    else:
+        # Compile without persistence
+        app = workflow.compile()
     
     return app
 
@@ -121,6 +137,7 @@ def run_workout(
         "next_node": "",
         "fatigue_scores": fatigue_scores,
         "last_session_timestamp": time.time(),
+        "workout_history": [],  # Will be loaded from persistence if available
         "messages": messages or [],
         "active_philosophy": None,
         "retrieved_rules": [],
@@ -131,11 +148,30 @@ def run_workout(
         "is_approved": False,
     }
     
-    # Build and run graph
-    app = build_graph(checkpoint_dir)
+    # Build and run graph with persistence enabled
+    app = build_graph(checkpoint_dir, enable_persistence=True)
     
     # Run with thread_id for persistence
+    # Each user_id maps to a unique thread_id, allowing per-user state isolation
     config = {"configurable": {"thread_id": user_id}}
+    
+    # Try to get existing state using LangGraph's get_state method
+    # This properly handles checkpoint metadata
+    try:
+        existing_state_result = app.get_state(config)
+        if existing_state_result and existing_state_result.values:
+            existing_state = existing_state_result.values
+            # Preserve workout_history from persisted state
+            if existing_state.get("workout_history"):
+                initial_state["workout_history"] = existing_state["workout_history"]
+            # Merge fatigue_scores: keep persisted ones, update with provided ones
+            if existing_state.get("fatigue_scores"):
+                merged_fatigue = {**existing_state["fatigue_scores"], **fatigue_scores}
+                initial_state["fatigue_scores"] = merged_fatigue
+    except Exception:
+        # If no existing state or error, continue with provided initial_state
+        pass
+    
     result = app.invoke(initial_state, config)
     
     return result

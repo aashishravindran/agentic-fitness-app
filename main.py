@@ -15,6 +15,14 @@ import config  # Load .env before any agents
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from agents.trainer import trainer_node
 from graph import run_workout
+from db_utils import (
+    list_users,
+    view_user_state,
+    update_user_fatigue,
+    clear_user_history,
+    delete_user,
+    export_user_state,
+)
 from ingest import ingest
 from state import FitnessState
 
@@ -216,6 +224,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         print("Example: python main.py chat \"I want a strength workout, my legs are a bit sore\"")
         print("Example: python main.py chat \"Give me a yoga flow, my hips are tight\"")
         print("Example: python main.py chat \"HIIT session please\" --persona hiit")
+        print("\n💡 Tip: Use --user-id to maintain persistent state across sessions")
         return
 
     defaults = {
@@ -235,7 +244,18 @@ def cmd_chat(args: argparse.Namespace) -> None:
     print("Fitness CLI — Supervisor + Agents")
     print("=" * 70)
     print(f"\nYou: {query}")
-    print(f"\nPersona: {persona} | Goal: {goal}")
+    print(f"\nUser ID: {user_id} (persistent state)")
+    print(f"Persona: {persona} | Goal: {goal}")
+    
+    # Check if history exists (by trying to load state)
+    from pathlib import Path
+    checkpoint_dir = Path("checkpoints")
+    db_path = checkpoint_dir / "checkpoints.db"
+    if db_path.exists():
+        print("📚 Loading workout history and fatigue state...")
+    else:
+        print("🆕 New user - starting fresh (history will be saved)")
+    
     print("\nRouting and generating workout...\n")
 
     try:
@@ -250,7 +270,22 @@ def cmd_chat(args: argparse.Namespace) -> None:
         if not workout:
             print("No workout generated. Supervisor may have routed to 'end'.")
             return
+        
+        # Show history info if available
+        history = result.get("workout_history", [])
+        if history:
+            print(f"📊 Workout History: {len(history)} previous workout(s)")
+            if len(history) > 1:
+                print(f"   (Previous workout analyzed for fatigue adjustments)")
+            print()
+        
         _print_workout(workout, json_out=args.json)
+        
+        # Show updated fatigue if history was applied
+        final_fatigue = result.get("fatigue_scores", {})
+        high_fatigue = {k: v for k, v in final_fatigue.items() if v > 0.5}
+        if high_fatigue:
+            print(f"\n⚠️  Current Fatigue Levels: {', '.join([f'{k}: {v:.2f}' for k, v in high_fatigue.items()])}")
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
@@ -259,6 +294,57 @@ def cmd_chat(args: argparse.Namespace) -> None:
         print("1. Run 'python main.py ingest' first")
         print("2. Set GOOGLE_API_KEY (or OPENAI_API_KEY) in .env")
         print("3. pip install -r requirements.txt")
+
+
+def cmd_db(args: argparse.Namespace) -> None:
+    """Database management commands."""
+    if args.db_cmd == "list":
+        users = list_users()
+        if users:
+            print(f"\nFound {len(users)} user(s) in database:\n")
+            for user in users:
+                print(f"  - {user}")
+        else:
+            print("\nNo users found in database")
+    
+    elif args.db_cmd == "view":
+        view_user_state(args.user_id)
+    
+    elif args.db_cmd == "update-fatigue":
+        # Parse fatigue scores
+        fatigue_dict = {}
+        for pair in args.fatigue.split(","):
+            if ":" in pair:
+                key, value = pair.split(":", 1)
+                fatigue_dict[key.strip()] = float(value.strip())
+        
+        if update_user_fatigue(args.user_id, fatigue_dict):
+            print(f"✅ Updated fatigue for {args.user_id}")
+            view_user_state(args.user_id)
+        else:
+            print(f"❌ User '{args.user_id}' not found")
+    
+    elif args.db_cmd == "clear-history":
+        if clear_user_history(args.user_id):
+            print(f"✅ Cleared workout history for {args.user_id}")
+        else:
+            print(f"❌ User '{args.user_id}' not found")
+    
+    elif args.db_cmd == "delete":
+        confirm = input(f"⚠️  Delete all data for user '{args.user_id}'? (yes/no): ")
+        if confirm.lower() == "yes":
+            if delete_user(args.user_id):
+                print(f"✅ Deleted user {args.user_id}")
+            else:
+                print(f"❌ User '{args.user_id}' not found")
+        else:
+            print("Cancelled")
+    
+    elif args.db_cmd == "export":
+        if export_user_state(args.user_id, args.output):
+            pass  # Message already printed
+        else:
+            print(f"❌ User '{args.user_id}' not found")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -331,9 +417,38 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Fatigue scores, e.g. 'legs:0.7,push:0.2'",
     )
-    p_chat.add_argument("--user-id", default="cli_user", help="User ID")
+    p_chat.add_argument(
+        "--user-id",
+        default="cli_user",
+        help="User ID for persistent state (same ID = same history across sessions)",
+    )
     p_chat.add_argument("--json", action="store_true", help="Output workout as JSON")
     p_chat.set_defaults(func=cmd_chat)
+
+    # Database management commands
+    p_db = sub.add_parser("db", help="Database management utilities")
+    db_sub = p_db.add_subparsers(dest="db_cmd", required=True)
+    
+    db_sub.add_parser("list", help="List all users in database")
+    
+    p_db_view = db_sub.add_parser("view", help="View user state")
+    p_db_view.add_argument("user_id", help="User ID to view")
+    
+    p_db_fatigue = db_sub.add_parser("update-fatigue", help="Update user fatigue scores")
+    p_db_fatigue.add_argument("user_id", help="User ID")
+    p_db_fatigue.add_argument("fatigue", help="Fatigue scores, e.g. 'legs:0.5,push:0.3'")
+    
+    p_db_clear = db_sub.add_parser("clear-history", help="Clear workout history for user")
+    p_db_clear.add_argument("user_id", help="User ID")
+    
+    p_db_delete = db_sub.add_parser("delete", help="Delete user from database")
+    p_db_delete.add_argument("user_id", help="User ID to delete")
+    
+    p_db_export = db_sub.add_parser("export", help="Export user state to JSON")
+    p_db_export.add_argument("user_id", help="User ID")
+    p_db_export.add_argument("output", help="Output JSON file path")
+    
+    p_db.set_defaults(func=cmd_db)
 
     return parser
 

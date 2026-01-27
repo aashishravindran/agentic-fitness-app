@@ -13,6 +13,7 @@ class FitnessState(TypedDict):
     # Persistent State
     fatigue_scores: Dict[str, float]  # e.g., {"legs": 0.8, "push": 0.1, "spine": 0.3}
     last_session_timestamp: float  # Unix timestamp of last session
+    workout_history: List[Dict]  # Stores previous workout JSONs for history-based fatigue
     
     # Context
     messages: List[Dict[str, str]]  # Conversation history

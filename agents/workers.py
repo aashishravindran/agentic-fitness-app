@@ -205,11 +205,17 @@ Generate a strength training workout focusing on push/pull/legs."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
+    workout_dict = workout.model_dump(mode="json")
+    
+    # Update workout history - append this workout
+    history = state.get("workout_history", [])
+    history.append(workout_dict)
     
     return {
-        "daily_workout": workout.model_dump(mode="json"),
+        "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
+        "workout_history": history,  # Save updated history
     }
 
 
@@ -257,11 +263,17 @@ Generate a yoga practice focusing on spine/hips/shoulders."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
+    workout_dict = workout.model_dump(mode="json")
+    
+    # Update workout history - append this workout
+    history = state.get("workout_history", [])
+    history.append(workout_dict)
     
     return {
-        "daily_workout": workout.model_dump(mode="json"),
+        "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
+        "workout_history": history,  # Save updated history
     }
 
 
@@ -309,11 +321,17 @@ Generate a HIIT workout focusing on cardio/cns systems."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
+    workout_dict = workout.model_dump(mode="json")
+    
+    # Update workout history - append this workout
+    history = state.get("workout_history", [])
+    history.append(workout_dict)
     
     return {
-        "daily_workout": workout.model_dump(mode="json"),
+        "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
+        "workout_history": history,  # Save updated history
     }
 
 
@@ -361,9 +379,15 @@ Generate a kickboxing workout focusing on coordination/speed/power/endurance."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
+    workout_dict = workout.model_dump(mode="json")
+    
+    # Update workout history - append this workout
+    history = state.get("workout_history", [])
+    history.append(workout_dict)
     
     return {
-        "daily_workout": workout.model_dump(mode="json"),
+        "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
+        "workout_history": history,  # Save updated history
     }
