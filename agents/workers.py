@@ -160,72 +160,7 @@ def retrieve_worker_philosophy(creator_name: str, k: int = 8) -> str:
     return "\n\n".join(rules)
 
 
-# Auto-fatigue: map workout focus to state fatigue_scores keys (+0.5 on completion)
-FATIGUE_INCREMENT = 0.5
-
-
-def _fatigue_keys_for_workout(daily_workout: Dict) -> List[str]:
-    """
-    Return the fatigue_scores keys to increment for this workout's focus.
-    Used to apply +0.5 automatically when a worker completes a session.
-    """
-    keys: List[str] = []
-    focus_area = (daily_workout.get("focus_area") or "").lower()
-    focus_system = (daily_workout.get("focus_system") or "").lower()
-    focus_attribute = (daily_workout.get("focus_attribute") or "").lower()
-
-    if focus_area:
-        if "leg" in focus_area or "squat" in focus_area or "deadlift" in focus_area:
-            keys.append("legs")
-        if "push" in focus_area or "chest" in focus_area or "press" in focus_area:
-            keys.append("push")
-        if "pull" in focus_area or "back" in focus_area or "row" in focus_area:
-            keys.append("pull")
-        if "spine" in focus_area or "back" in focus_area:
-            keys.append("spine")
-        if "hip" in focus_area:
-            keys.append("hips")
-        if "shoulder" in focus_area:
-            keys.append("shoulders")
-    if focus_system:
-        if "cardio" in focus_system or "metabolic" in focus_system:
-            keys.append("cardio")
-        if "cns" in focus_system:
-            keys.append("cns")
-    if focus_attribute:
-        if "coordination" in focus_attribute:
-            keys.append("coordination")
-        if "speed" in focus_attribute or "power" in focus_attribute:
-            keys.append("speed")
-        if "endurance" in focus_attribute:
-            keys.append("endurance")
-
-    # Deduplicate while preserving order; if nothing matched, default to one key by workout type
-    seen = set()
-    out = []
-    for k in keys:
-        if k not in seen:
-            seen.add(k)
-            out.append(k)
-    if not out and focus_area:
-        out = ["legs" if "leg" in focus_area else "push" if "push" in focus_area else "pull"]
-    if not out and focus_system:
-        out = ["cardio"]
-    if not out and focus_attribute:
-        out = ["coordination"]
-    return out[:1]  # Single primary key: +0.5 for that group (per spec)
-
-
-def apply_auto_fatigue(current_fatigue: Dict, daily_workout: Dict) -> Dict:
-    """Increment fatigue_scores for the workout's focus area. +0.5 for primary key, caps at 1.0."""
-    keys = _fatigue_keys_for_workout(daily_workout)
-    if not keys:
-        return dict(current_fatigue)
-    updated = dict(current_fatigue)
-    k = keys[0]
-    updated[k] = min(1.0, updated.get(k, 0.0) + FATIGUE_INCREMENT)
-    return updated
-
+# v1: Fatigue is applied in finalize_workout (RPE-based or default) after log/finish.
 
 # ============================================================================
 # Iron Worker (Strength Training)
@@ -273,24 +208,12 @@ Generate a strength training workout focusing on push/pull/legs."""
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
     workout_dict = workout.model_dump(mode="json")
-    
-    # Update workout history - append this workout
-    history = state.get("workout_history", [])
-    history.append(workout_dict)
-    
-    # Increment weekly workout counter
-    workouts_completed = state.get("workouts_completed_this_week", 0)
-    
-    # Auto-fatigue: increment fatigue for this workout's focus area (+0.5)
-    fatigue_scores = apply_auto_fatigue(state.get("fatigue_scores", {}), workout_dict)
-    
+    # v1 logging: history/counter/fatigue applied in finalize_workout after log or finish
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
-        "workout_history": history,
-        "workouts_completed_this_week": workouts_completed + 1,
-        "fatigue_scores": fatigue_scores,
+        "is_working_out": True,
     }
 
 
@@ -339,24 +262,11 @@ Generate a yoga practice focusing on spine/hips/shoulders."""
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
     workout_dict = workout.model_dump(mode="json")
-    
-    # Update workout history - append this workout
-    history = state.get("workout_history", [])
-    history.append(workout_dict)
-    
-    # Increment weekly workout counter
-    workouts_completed = state.get("workouts_completed_this_week", 0)
-    
-    # Auto-fatigue: increment fatigue for this workout's focus area (+0.5)
-    fatigue_scores = apply_auto_fatigue(state.get("fatigue_scores", {}), workout_dict)
-    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
-        "workout_history": history,
-        "workouts_completed_this_week": workouts_completed + 1,
-        "fatigue_scores": fatigue_scores,
+        "is_working_out": True,
     }
 
 
@@ -405,24 +315,11 @@ Generate a HIIT workout focusing on cardio/cns systems."""
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
     workout_dict = workout.model_dump(mode="json")
-    
-    # Update workout history - append this workout
-    history = state.get("workout_history", [])
-    history.append(workout_dict)
-    
-    # Increment weekly workout counter
-    workouts_completed = state.get("workouts_completed_this_week", 0)
-    
-    # Auto-fatigue: increment fatigue for this workout's focus area (+0.5)
-    fatigue_scores = apply_auto_fatigue(state.get("fatigue_scores", {}), workout_dict)
-    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
-        "workout_history": history,
-        "workouts_completed_this_week": workouts_completed + 1,
-        "fatigue_scores": fatigue_scores,
+        "is_working_out": True,
     }
 
 
@@ -471,22 +368,9 @@ Generate a kickboxing workout focusing on coordination/speed/power/endurance."""
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
     workout_dict = workout.model_dump(mode="json")
-    
-    # Update workout history - append this workout
-    history = state.get("workout_history", [])
-    history.append(workout_dict)
-    
-    # Increment weekly workout counter
-    workouts_completed = state.get("workouts_completed_this_week", 0)
-    
-    # Auto-fatigue: increment fatigue for this workout's focus area (+0.5)
-    fatigue_scores = apply_auto_fatigue(state.get("fatigue_scores", {}), workout_dict)
-    
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
         "current_workout": workout.model_dump_json(),
-        "workout_history": history,
-        "workouts_completed_this_week": workouts_completed + 1,
-        "fatigue_scores": fatigue_scores,
+        "is_working_out": True,
     }

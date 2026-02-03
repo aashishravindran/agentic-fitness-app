@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 # Ensure project root is on path (fixes "No module named 'config'" when run from other dirs)
@@ -14,7 +15,7 @@ if str(_ROOT) not in sys.path:
 import config  # Load .env before any agents
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from agents.trainer import trainer_node
-from graph import run_workout
+from graph import build_graph, run_workout
 from db_utils import (
     list_users,
     view_user_state,
@@ -25,9 +26,10 @@ from db_utils import (
     clear_user_history,
     delete_user,
     export_user_state,
+    simulate_new_week,
 )
 from ingest import ingest
-from state import FitnessState
+from state import ExerciseLog, FitnessState, SetLog
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
@@ -255,16 +257,8 @@ def _print_workout(workout: dict, *, json_out: bool = False) -> None:
 
 
 def cmd_chat(args: argparse.Namespace) -> None:
-    """CLI: natural language query → Supervisor → workers → workout."""
+    """Interactive CLI: chat is the entry point. Run commands start_workout, finish_workout, log_exercise or type natural language."""
     query = (getattr(args, "query", "") or "").strip()
-    if not query:
-        print("Usage: python main.py chat \"<your request>\"")
-        print("Example: python main.py chat \"I want a strength workout, my legs are a bit sore\"")
-        print("Example: python main.py chat \"Give me a yoga flow, my hips are tight\"")
-        print("Example: python main.py chat \"HIIT session please\" --persona hiit")
-        print("\n💡 Tip: Use --user-id to maintain persistent state across sessions")
-        return
-
     defaults = {
         "legs": 0.2, "push": 0.2, "pull": 0.2,
         "spine": 0.1, "hips": 0.1, "shoulders": 0.1,
@@ -275,82 +269,400 @@ def cmd_chat(args: argparse.Namespace) -> None:
     persona = args.persona
     goal = args.goal
     user_id = args.user_id
-
-    messages = [{"role": "user", "content": query}]
+    checkpoint_dir = "checkpoints"
 
     print("=" * 70)
-    print("Fitness CLI — Supervisor + Agents")
+    print("Fitness CLI — Interactive (chat)")
     print("=" * 70)
-    print(f"\nYou: {query}")
-    print(f"\nUser ID: {user_id} (persistent state)")
-    print(f"Persona: {persona} | Goal: {goal}")
-    
-    # Check if history exists (by trying to load state)
-    from pathlib import Path
-    checkpoint_dir = Path("checkpoints")
-    db_path = checkpoint_dir / "checkpoints.db"
-    if db_path.exists():
-        print("📚 Loading workout history and fatigue state...")
-    else:
-        print("🆕 New user - starting fresh (history will be saved)")
-    
-    print("\nRouting and generating workout...\n")
+    print(f"User ID: {user_id} | Persona: {persona} | Goal: {goal}")
+
+    # Optional first query: run once then go into loop
+    if query:
+        print(f"\nYou: {query}\n")
+        try:
+            result = run_workout(
+                user_id=user_id,
+                persona=persona,
+                goal=goal,
+                fatigue_scores=fatigue_scores,
+                messages=[{"role": "user", "content": query}],
+                checkpoint_dir=checkpoint_dir,
+            )
+            workout = result.get("daily_workout")
+            workouts_completed = result.get("workouts_completed_this_week", 0)
+            max_workouts = result.get("max_workouts_per_week", 4)
+            if not workout:
+                if workouts_completed >= max_workouts and max_workouts > 0:
+                    print("\n🎯 Workout goal achieved for the week! Prioritize rest.\n")
+                else:
+                    print("No workout generated.")
+            else:
+                _print_workout(workout, json_out=getattr(args, "json", False))
+                if result.get("is_working_out"):
+                    print("\n📋 Session paused. Use start_workout, log_exercise <name> <RPE>, finish_workout.")
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
 
     try:
-        result = run_workout(
-            user_id=user_id,
-            persona=persona,
-            goal=goal,
-            fatigue_scores=fatigue_scores,
-            messages=messages,
-        )
-        workout = result.get("daily_workout")
-        workouts_completed = result.get("workouts_completed_this_week", 0)
-        max_workouts = result.get("max_workouts_per_week", 4)
-
-        if not workout:
-            if workouts_completed >= max_workouts and max_workouts > 0:
-                print("\n🎯 Workout goal achieved for the week!")
-                print("   Be sure to prioritize rest and relaxation. See you next week.\n")
-            else:
-                print("No workout generated. Supervisor may have routed to 'end'.")
-            return
-
-        # Show history and safety info
-        history = result.get("workout_history", [])
-        fatigue_threshold = result.get("fatigue_threshold", 0.8)
-
-        if history:
-            print(f"📊 Workout History: {len(history)} previous workout(s)")
-            if len(history) > 1:
-                print(f"   (Previous workout analyzed for fatigue adjustments)")
-        
-        print(f"📅 Weekly Progress: {workouts_completed}/{max_workouts} workouts completed")
-        if workouts_completed >= max_workouts:
-            print("   ⚠️  Weekly limit reached - rest recommended")
-        print()
-        
-        _print_workout(workout, json_out=args.json)
-        
-        # Show updated fatigue and safety warnings
-        final_fatigue = result.get("fatigue_scores", {})
-        max_fatigue = max(final_fatigue.values()) if final_fatigue else 0.0
-        high_fatigue = {k: v for k, v in final_fatigue.items() if v > 0.5}
-        
-        if high_fatigue:
-            print(f"\n⚠️  Current Fatigue Levels: {', '.join([f'{k}: {v:.2f}' for k, v in high_fatigue.items()])}")
-        
-        if max_fatigue > fatigue_threshold:
-            print(f"\n🚨 SAFETY ALERT: Max fatigue ({max_fatigue:.2f}) exceeds threshold ({fatigue_threshold:.2f})")
-            print("   Next session will be routed to recovery automatically. Rest is recommended.")
+        _interactive_chat_loop(user_id, persona, goal, fatigue_scores, checkpoint_dir)
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
-        print("\nTroubleshooting:")
-        print("1. Run 'python main.py ingest' first")
-        print("2. Set GOOGLE_API_KEY (or OPENAI_API_KEY) in .env")
-        print("3. pip install -r requirements.txt")
+
+
+def _get_app_and_config(user_id: str, checkpoint_dir: str = "checkpoints"):
+    """Build graph and return (app, config) for the user thread."""
+    app = build_graph(checkpoint_dir, enable_persistence=True)
+    config = {"configurable": {"thread_id": user_id}}
+    return app, config
+
+
+def _get_state_dict(app, config) -> dict:
+    """Get current state dict from app checkpoint."""
+    try:
+        snap = app.get_state(config)
+        values = getattr(snap, "values", snap) if snap else {}
+        return values if isinstance(values, dict) else (getattr(values, "__dict__", {}) or {})
+    except Exception:
+        return {}
+
+
+def _default_muscle_for_workout(workout: dict) -> str:
+    """Infer default muscle group from workout focus."""
+    focus = (workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute") or "general").lower()
+    if "leg" in focus:
+        return "legs"
+    if "push" in focus or "chest" in focus:
+        return "push"
+    if "pull" in focus or "back" in focus:
+        return "pull"
+    if "spine" in focus:
+        return "spine"
+    if "hip" in focus:
+        return "hips"
+    if "shoulder" in focus:
+        return "shoulders"
+    if "cardio" in focus:
+        return "cardio"
+    if "cns" in focus:
+        return "cns"
+    return "general"
+
+
+def _print_session_status(state: dict, default_persona: str) -> None:
+    """Print workouts so far, current persona, and fatigue scores (shown on login and via status/fatigue)."""
+    wc = state.get("workouts_completed_this_week", 0)
+    mw = state.get("max_workouts_per_week", 4)
+    persona = state.get("selected_persona") or default_persona
+    fatigue = state.get("fatigue_scores") or {}
+    threshold = state.get("fatigue_threshold", 0.8)
+    print(f"  Workouts this week: {wc}/{mw}")
+    print(f"  Persona: {persona}")
+    if fatigue:
+        # Show non-zero first, then the rest
+        nonzero = {k: v for k, v in fatigue.items() if v > 0}
+        other = {k: v for k, v in fatigue.items() if v == 0}
+        parts = [f"{k}: {v:.2f}" for k, v in sorted(nonzero.items())] + [f"{k}: {v:.2f}" for k, v in sorted(other.items())]
+        print(f"  Fatigue: {', '.join(parts)}")
+        if nonzero and max(nonzero.values()) > threshold:
+            print(f"  ⚠️  Max fatigue above threshold ({threshold}) — recovery may be suggested.")
+    else:
+        print("  Fatigue: (none recorded)")
+    print()
+
+
+def _interactive_chat_loop(
+    user_id: str,
+    persona: str,
+    goal: str,
+    fatigue_defaults: dict,
+    checkpoint_dir: str = "checkpoints",
+) -> None:
+    """REPL: accept natural language or commands start_workout, finish_workout, log_exercise, fatigue, new_week, quit."""
+    app, config = _get_app_and_config(user_id, checkpoint_dir)
+    # Show session status on login
+    state = _get_state_dict(app, config)
+    print("\n--- Session ---")
+    _print_session_status(state, persona)
+    print("Commands: start_workout | finish_workout | log_exercise [name] [RPE] | fatigue | new_week | quit")
+    print("Or type a natural language request (e.g. 'I want a leg workout').\n")
+    while True:
+        try:
+            line = input("> ").strip()
+            if not line:
+                continue
+            low = line.lower()
+            # --- start_workout
+            if low in ("start_workout", "start", "show"):
+                state = _get_state_dict(app, config)
+                workout = state.get("daily_workout")
+                if not workout:
+                    print("No active workout. Type a request (e.g. 'I want a strength workout') to generate one.")
+                    continue
+                print()
+                _print_workout(workout, json_out=False)
+                print("\nUse log_exercise <name> <RPE> to log, then finish_workout when done.")
+                continue
+            # --- finish_workout
+            if low in ("finish_workout", "finish", "done"):
+                result = app.invoke(None, config)
+                print("Workout finalized and saved.")
+                wc = result.get("workouts_completed_this_week", 0)
+                mw = result.get("max_workouts_per_week", 4)
+                if mw:
+                    print(f"Weekly progress: {wc}/{mw}")
+                continue
+            # --- log_exercise: one exercise + score (RPE). e.g. log_exercise "Bench Press" 8 or log Bench 8
+            if low.startswith("log_exercise") or low == "log" or low.startswith("log "):
+                tokens = line.split()
+                if low.startswith("log_exercise"):
+                    rest = " ".join(tokens[1:]).strip() if len(tokens) > 1 else ""
+                else:
+                    rest = " ".join(tokens[1:]).strip() if len(tokens) > 1 else ""
+                exercise_name = None
+                rpe_val = None
+                if rest:
+                    parts = rest.strip().split()
+                    if len(parts) >= 2:
+                        # "Bench Press" 8 or Bench 8
+                        try:
+                            rpe_val = int(parts[-1])
+                            exercise_name = " ".join(parts[:-1]).strip().strip('"\'')
+                        except ValueError:
+                            pass
+                    elif len(parts) == 1:
+                        try:
+                            rpe_val = int(parts[0])
+                        except ValueError:
+                            exercise_name = parts[0]
+                if not exercise_name:
+                    exercise_name = input("Exercise name? ").strip() or "Unknown"
+                if rpe_val is None:
+                    rpe_s = input("RPE (1-10)? ").strip() or "5"
+                    try:
+                        rpe_val = max(1, min(10, int(rpe_s)))
+                    except ValueError:
+                        rpe_val = 5
+                state = _get_state_dict(app, config)
+                workout = state.get("daily_workout")
+                if not workout:
+                    print("No active workout. Generate one first (e.g. 'I want a strength workout').")
+                    continue
+                default_muscle = _default_muscle_for_workout(workout)
+                active_logs = list(state.get("active_logs") or [])
+                found = False
+                for entry in active_logs:
+                    if (entry.get("exercise_name") or "").strip().lower() == exercise_name.strip().lower():
+                        sets_list = entry.get("sets") or []
+                        sets_list.append({"weight": 0.0, "reps": 0, "rpe": rpe_val})
+                        entry["sets"] = sets_list
+                        entry["average_rpe"] = round(sum(s.get("rpe", 5) for s in sets_list) / len(sets_list), 2)
+                        found = True
+                        break
+                if not found:
+                    active_logs.append({
+                        "exercise_name": exercise_name.strip(),
+                        "muscle_group": default_muscle,
+                        "sets": [{"weight": 0.0, "reps": 0, "rpe": rpe_val}],
+                        "average_rpe": float(rpe_val),
+                    })
+                app.update_state(config, {"active_logs": active_logs})
+                print(f"Logged {exercise_name} RPE {rpe_val}.")
+                continue
+            # --- fatigue (view fatigue scores)
+            if low in ("fatigue", "scores", "status"):
+                state = _get_state_dict(app, config)
+                print("--- Fatigue & status ---")
+                _print_session_status(state, persona)
+                continue
+            # --- new_week (simulate new week) — reset counter, set last session 7d ago, apply 7d decay to fatigue
+            if low in ("new_week", "new week"):
+                state = _get_state_dict(app, config)
+                fatigue = state.get("fatigue_scores") or {}
+                decay_factor = 0.97
+                hours_week = 168  # 7 days
+                decayed_scores = {k: max(0.0, v * (decay_factor ** hours_week)) for k, v in fatigue.items()}
+                app.update_state(
+                    config,
+                    {
+                        "workouts_completed_this_week": 0,
+                        "last_session_timestamp": time.time() - (7 * 24 * 3600),
+                        "fatigue_scores": decayed_scores,
+                    },
+                )
+                print("✅ New week applied (counter reset, fatigue decayed as if 7 days passed).")
+                state = _get_state_dict(app, config)
+                _print_session_status(state, persona)
+                continue
+            # --- quit
+            if low in ("quit", "exit", "q"):
+                print("Bye.")
+                return
+            # --- natural language: run workout
+            messages = [{"role": "user", "content": line}]
+            result = run_workout(
+                user_id=user_id,
+                persona=persona,
+                goal=goal,
+                fatigue_scores=fatigue_defaults,
+                messages=messages,
+                checkpoint_dir=checkpoint_dir,
+            )
+            workout = result.get("daily_workout")
+            workouts_completed = result.get("workouts_completed_this_week", 0)
+            max_workouts = result.get("max_workouts_per_week", 4)
+            if not workout:
+                if workouts_completed >= max_workouts and max_workouts > 0:
+                    print("\n🎯 Workout goal achieved for the week! Prioritize rest.\n")
+                else:
+                    print("No workout generated.")
+                continue
+            _print_workout(workout, json_out=False)
+            if result.get("is_working_out"):
+                print("\n📋 Session paused. Use start_workout to view, log_exercise <name> <RPE> to log, finish_workout when done.")
+        except EOFError:
+            print("\nBye.")
+            return
+        except KeyboardInterrupt:
+            print("\nBye.")
+            return
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+def cmd_start_workout(args: argparse.Namespace) -> None:
+    """Resume the current thread and display the generated workout (after chat/train)."""
+    user_id = getattr(args, "user_id", "cli_user")
+    app, config = _get_app_and_config(user_id)
+    try:
+        state_snapshot = app.get_state(config)
+        values = getattr(state_snapshot, "values", state_snapshot) if state_snapshot else {}
+        if isinstance(values, dict):
+            state = values
+        else:
+            state = getattr(values, "__dict__", {}) or {}
+        workout = state.get("daily_workout")
+        if not workout:
+            print("No active workout found. Run: python main.py chat \"I want a workout\" --user-id", user_id, "first.")
+            return
+        print("=" * 70)
+        print("Current workout (log with: python main.py log-exercise --user-id", user_id + ")")
+        print("=" * 70)
+        _print_workout(workout, json_out=False)
+        print("\nTo log sets: python main.py log-exercise --user-id", user_id)
+        print("When done:   python main.py finish-workout --user-id", user_id)
+    except Exception as e:
+        print("Error loading state:", e)
+
+
+def cmd_log_exercise(args: argparse.Namespace) -> None:
+    """Prompt for each exercise: sets, then weight/reps/RPE per set; inject active_logs into state."""
+    user_id = getattr(args, "user_id", "cli_user")
+    app, config = _get_app_and_config(user_id)
+    try:
+        state_snapshot = app.get_state(config)
+        values = getattr(state_snapshot, "values", state_snapshot) if state_snapshot else {}
+        state = values if isinstance(values, dict) else (getattr(values, "__dict__", {}) or {})
+        workout = state.get("daily_workout")
+        if not workout:
+            print("No active workout. Generate one with: python main.py chat \"I want a workout\" --user-id", user_id)
+            return
+        # Collect exercise names and default muscle group from workout focus
+        focus = (workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute") or "general").lower()
+        if "leg" in focus:
+            default_muscle = "legs"
+        elif "push" in focus or "chest" in focus:
+            default_muscle = "push"
+        elif "pull" in focus or "back" in focus:
+            default_muscle = "pull"
+        elif "spine" in focus or "hip" in focus:
+            default_muscle = "spine" if "spine" in focus else "hips"
+        elif "shoulder" in focus:
+            default_muscle = "shoulders"
+        elif "cardio" in focus or "cns" in focus:
+            default_muscle = "cardio" if "cardio" in focus else "cns"
+        else:
+            default_muscle = "general"
+        items = []
+        if "exercises" in workout and workout["exercises"]:
+            for ex in workout["exercises"]:
+                items.append((ex.get("exercise_name", "?"), ex.get("focus_area") or default_muscle))
+        elif "poses" in workout and workout["poses"]:
+            for p in workout["poses"]:
+                items.append((p.get("pose_name", "?"), (p.get("focus_area") or default_muscle).lower()))
+        else:
+            print("No exercises/poses in this workout.")
+            return
+        active_logs = []
+        for i, (name, muscle_group) in enumerate(items, 1):
+            print(f"\n--- Exercise {i}: {name} (muscle_group: {muscle_group}) ---")
+            try:
+                n_sets = int(input("Number of sets (e.g. 3): ").strip() or "1")
+            except ValueError:
+                n_sets = 1
+            sets_log = []
+            for s in range(n_sets):
+                w = input(f"  Set {s+1} weight (kg): ").strip()
+                r = input(f"  Set {s+1} reps: ").strip()
+                rpe_s = input(f"  Set {s+1} RPE (1-10): ").strip()
+                weight = float(w) if w else 0.0
+                reps = int(r) if r else 0
+                rpe = int(rpe_s) if rpe_s else 5
+                rpe = max(1, min(10, rpe))
+                sets_log.append({"weight": weight, "reps": reps, "rpe": rpe})
+            avg_rpe = sum(x["rpe"] for x in sets_log) / len(sets_log) if sets_log else 0.0
+            active_logs.append({
+                "exercise_name": name,
+                "muscle_group": muscle_group,
+                "sets": sets_log,
+                "average_rpe": round(avg_rpe, 2),
+            })
+        app.update_state(config, {"active_logs": active_logs})
+        print("\nLogs saved. Run: python main.py finish-workout --user-id", user_id)
+    except Exception as e:
+        print("Error:", e)
+        import traceback
+        traceback.print_exc()
+
+
+def cmd_finish_workout(args: argparse.Namespace) -> None:
+    """Aggregate logs, compute RPE-based fatigue, save to history, and resume graph to end."""
+    user_id = getattr(args, "user_id", "cli_user")
+    app, config = _get_app_and_config(user_id)
+    try:
+        result = app.invoke(None, config)
+        workout = result.get("daily_workout")
+        print("Workout finalized and saved.")
+        if result.get("workout_history"):
+            print("Weekly progress:", result.get("workouts_completed_this_week", 0), "/", result.get("max_workouts_per_week", 4))
+        if workout:
+            print("Focus:", workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute"))
+    except Exception as e:
+        print("Error finishing workout:", e)
+        import traceback
+        traceback.print_exc()
+
+
+def cmd_reset_workout(args: argparse.Namespace) -> None:
+    """Clear the current in-progress workout for this user so you can start a new one. Keeps history, fatigue, and settings."""
+    user_id = getattr(args, "user_id", "cli_user")
+    app, config = _get_app_and_config(user_id)
+    try:
+        app.update_state(
+            config,
+            {"daily_workout": None, "active_logs": [], "is_working_out": False},
+        )
+        app.invoke(None, config)  # run finalize (no-op when no workout) so graph reaches END
+        print("Workout reset for", user_id + ". You can run chat again to get a new workout.")
+    except Exception as e:
+        print("Error resetting workout:", e)
+        import traceback
+        traceback.print_exc()
 
 
 def cmd_db(args: argparse.Namespace) -> None:
@@ -407,7 +719,16 @@ def cmd_db(args: argparse.Namespace) -> None:
             print(f"✅ Cleared workout history for {args.user_id}")
         else:
             print(f"❌ User '{args.user_id}' not found")
-    
+
+    elif args.db_cmd == "new-week":
+        if simulate_new_week(args.user_id):
+            print(f"✅ Simulated new week for {args.user_id}")
+            print("   (workouts_completed_this_week = 0, last_session = 7 days ago)")
+            print("   Next chat will apply a week of fatigue decay.")
+            view_user_state(args.user_id)
+        else:
+            print(f"❌ User '{args.user_id}' not found")
+
     elif args.db_cmd == "delete":
         confirm = input(f"⚠️  Delete all data for user '{args.user_id}'? (yes/no): ")
         if confirm.lower() == "yes":
@@ -475,13 +796,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_chat = sub.add_parser(
         "chat",
-        help="Natural language query → Supervisor routes to agents, returns workout",
+        help="Interactive CLI: optional initial request, then commands start_workout, finish_workout, log_exercise",
     )
     p_chat.add_argument(
         "query",
         nargs="?",
         default="",
-        help="Your request, e.g. 'I want a yoga session, my hips are tight'",
+        help="Optional first request (e.g. 'I want a leg workout'); then enter interactive loop",
     )
     p_chat.add_argument(
         "--persona",
@@ -502,6 +823,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_chat.add_argument("--json", action="store_true", help="Output workout as JSON")
     p_chat.set_defaults(func=cmd_chat)
+
+    # v1 Workout logging (after chat generates a workout, graph pauses; log then finish)
+    p_start = sub.add_parser("start-workout", help="Show current generated workout (after chat)")
+    p_start.add_argument("--user-id", default="cli_user", help="User ID (thread)")
+    p_start.set_defaults(func=cmd_start_workout)
+
+    p_log = sub.add_parser("log-exercise", help="Log sets (weight, reps, RPE) for each exercise")
+    p_log.add_argument("--user-id", default="cli_user", help="User ID (thread)")
+    p_log.set_defaults(func=cmd_log_exercise)
+
+    p_finish = sub.add_parser("finish-workout", help="Save logs, apply RPE fatigue, and end session")
+    p_finish.add_argument("--user-id", default="cli_user", help="User ID (thread)")
+    p_finish.set_defaults(func=cmd_finish_workout)
+
+    p_reset = sub.add_parser("reset-workout", help="Clear current workout for user; keeps history and settings")
+    p_reset.add_argument("--user-id", default="cli_user", help="User ID (thread)")
+    p_reset.set_defaults(func=cmd_reset_workout)
 
     # Database management commands
     p_db = sub.add_parser("db", help="Database management utilities")
@@ -530,6 +868,9 @@ def build_parser() -> argparse.ArgumentParser:
     
     p_db_clear = db_sub.add_parser("clear-history", help="Clear workout history for user")
     p_db_clear.add_argument("user_id", help="User ID")
+
+    p_db_new_week = db_sub.add_parser("new-week", help="Simulate new week: reset counter + 7-day decay on next run")
+    p_db_new_week.add_argument("user_id", help="User ID")
     
     p_db_delete = db_sub.add_parser("delete", help="Delete user from database")
     p_db_delete.add_argument("user_id", help="User ID to delete")

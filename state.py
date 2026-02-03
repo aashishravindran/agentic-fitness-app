@@ -2,6 +2,24 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional, TypedDict
 
+from pydantic import BaseModel, Field
+
+
+# --- Workout logging (v1) ---
+class SetLog(BaseModel):
+    """Single set performance."""
+    weight: float
+    reps: int
+    rpe: int = Field(ge=1, le=10, description="Rate of Perceived Exertion 1-10")
+
+
+class ExerciseLog(BaseModel):
+    """Logged performance for one exercise."""
+    exercise_name: str
+    muscle_group: str
+    sets: List[SetLog]
+    average_rpe: float = 0.0
+
 
 class FitnessState(TypedDict):
     # Identity & Routing
@@ -31,5 +49,9 @@ class FitnessState(TypedDict):
     current_workout: Optional[str]  # Legacy: string representation
     daily_workout: Optional[Dict]  # Structured workout plan (JSON-friendly)
     is_approved: bool  # HITL status
+
+    # Live workout logging (v1)
+    active_logs: Optional[List[Dict]]  # List of ExerciseLog as dicts (set after log-exercise)
+    is_working_out: Optional[bool]  # True when paused after worker, waiting for log/finish
 
 

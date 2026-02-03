@@ -353,6 +353,46 @@ def clear_user_history(user_id: str, checkpoint_dir: str = "checkpoints") -> boo
         return False
 
 
+def simulate_new_week(user_id: str, checkpoint_dir: str = "checkpoints") -> bool:
+    """
+    Simulate a new week: set workouts_completed_this_week to 0 and set
+    last_session_timestamp to 7 days ago. On the next chat run, the decay
+    node will see 168+ hours passed and apply a week of fatigue decay.
+    
+    Args:
+        user_id: User ID (thread_id)
+        checkpoint_dir: Directory containing the checkpoint database
+    
+    Returns:
+        True if updated, False if user not found
+    """
+    import time
+    if not SQLITE_AVAILABLE:
+        return False
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return False
+    state["workouts_completed_this_week"] = 0
+    # 7 days ago so decay node applies a week of decay on next run
+    state["last_session_timestamp"] = time.time() - (7 * 24 * 3600)
+    checkpointer = get_checkpointer(checkpoint_dir)
+    read_config = {"configurable": {"thread_id": user_id}}
+    try:
+        current_checkpoint = checkpointer.get(read_config)
+        if not current_checkpoint:
+            return False
+        checkpoint = dict(current_checkpoint)
+        checkpoint["channel_values"] = state
+        write_config = {"configurable": {"thread_id": user_id, "checkpoint_ns": ""}}
+        checkpointer.put(write_config, checkpoint, {}, {})
+        return True
+    except Exception as e:
+        print(f"Error simulating new week: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def delete_user(user_id: str, checkpoint_dir: str = "checkpoints") -> bool:
     """
     Delete all data for a user.

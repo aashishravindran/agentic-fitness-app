@@ -28,6 +28,7 @@ except ImportError:
     SQLITE_AVAILABLE = False
 
 from agents.decay import decay_node
+from agents.finalize_workout import finalize_workout_node
 from agents.history_analyzer import history_analysis_node
 from agents.recovery_worker import recovery_worker
 from agents.supervisor import supervisor_node
@@ -80,8 +81,9 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_node("yoga_worker", yoga_worker)
     workflow.add_node("hiit_worker", hiit_worker)
     workflow.add_node("kb_worker", kb_worker)
-    workflow.add_node("recovery_worker", recovery_worker)  # Recovery and rest days
-    
+    workflow.add_node("recovery_worker", recovery_worker)
+    workflow.add_node("finalize_workout", finalize_workout_node)  # v1: after log, apply RPE fatigue
+
     # Set entry point - Supervisor handles all user interactions
     workflow.set_entry_point("supervisor")
     
@@ -101,28 +103,27 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
         },
     )
     
-    # All workers end
-    workflow.add_edge("iron_worker", END)
-    workflow.add_edge("yoga_worker", END)
-    workflow.add_edge("hiit_worker", END)
-    workflow.add_edge("kb_worker", END)
+    # Training workers → interrupt → on resume: finalize_workout then END (v1 logging)
+    workflow.add_edge("iron_worker", "finalize_workout")
+    workflow.add_edge("yoga_worker", "finalize_workout")
+    workflow.add_edge("hiit_worker", "finalize_workout")
+    workflow.add_edge("kb_worker", "finalize_workout")
+    workflow.add_edge("finalize_workout", END)
     workflow.add_edge("recovery_worker", END)
-    
-    # Compile graph with persistence if available
+
+    # Compile with breakpoint after training workers (user can log sets before finalize)
     if enable_persistence and SQLITE_AVAILABLE and SqliteSaver:
-        # Create checkpoint directory
         Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
-        
-        # Create SQLite connection for persistence
         db_path = Path(checkpoint_dir) / "checkpoints.db"
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
         memory = SqliteSaver(conn)
-        
-        app = workflow.compile(checkpointer=memory)
+        app = workflow.compile(
+            checkpointer=memory,
+            interrupt_after=["iron_worker", "yoga_worker", "hiit_worker", "kb_worker"],
+        )
     else:
-        # Compile without persistence
         app = workflow.compile()
-    
+
     return app
 
 
@@ -170,6 +171,8 @@ def run_workout(
         "current_workout": None,
         "daily_workout": None,
         "is_approved": False,
+        "active_logs": [],
+        "is_working_out": False,
     }
     
     # Build and run graph with persistence enabled
@@ -200,6 +203,10 @@ def run_workout(
                     initial_state["workouts_completed_this_week"] = existing_state["workouts_completed_this_week"]
                 if existing_state.get("fatigue_threshold"):
                     initial_state["fatigue_threshold"] = existing_state["fatigue_threshold"]
+                if "active_logs" in existing_state:
+                    initial_state["active_logs"] = existing_state.get("active_logs") or []
+                if "is_working_out" in existing_state:
+                    initial_state["is_working_out"] = existing_state.get("is_working_out", False)
     except Exception:
         # If loading fails, continue with provided initial_state
         pass
@@ -210,13 +217,35 @@ def run_workout(
         result = app.invoke(initial_state, config)
     except KeyError as e:
         if "step" in str(e):
-            # Corrupted checkpoint - delete and retry
+            # Corrupted checkpoint - delete and retry with fresh state (no merged fatigue)
             print(f"⚠️  Corrupted checkpoint detected. Deleting and retrying...")
             try:
                 from db_utils import delete_user
                 delete_user(user_id, checkpoint_dir)
-                # Retry with fresh state
-                result = app.invoke(initial_state, config)
+                # Retry with fresh initial_state (no merge) so we don't pass stale high fatigue
+                fresh_state: FitnessState = {
+                    "user_id": user_id,
+                    "selected_persona": persona,
+                    "selected_creator": persona,
+                    "next_node": "",
+                    "fatigue_scores": fatigue_scores,
+                    "last_session_timestamp": time.time(),
+                    "workout_history": [],
+                    "max_workouts_per_week": 4,
+                    "workouts_completed_this_week": 0,
+                    "fatigue_threshold": 0.8,
+                    "messages": messages or [],
+                    "active_philosophy": None,
+                    "retrieved_rules": [],
+                    "retrieved_philosophy": "",
+                    "goal": goal,
+                    "current_workout": None,
+                    "daily_workout": None,
+                    "is_approved": False,
+                    "active_logs": [],
+                    "is_working_out": False,
+                }
+                result = app.invoke(fresh_state, config)
             except Exception as retry_error:
                 raise Exception(f"Failed to recover from corrupted checkpoint: {retry_error}") from e
         else:
