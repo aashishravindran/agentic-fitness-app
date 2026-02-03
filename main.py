@@ -305,16 +305,21 @@ def cmd_chat(args: argparse.Namespace) -> None:
             messages=messages,
         )
         workout = result.get("daily_workout")
-        if not workout:
-            print("No workout generated. Supervisor may have routed to 'end'.")
-            return
-        
-        # Show history and safety info
-        history = result.get("workout_history", [])
         workouts_completed = result.get("workouts_completed_this_week", 0)
         max_workouts = result.get("max_workouts_per_week", 4)
+
+        if not workout:
+            if workouts_completed >= max_workouts and max_workouts > 0:
+                print("\n🎯 Workout goal achieved for the week!")
+                print("   Be sure to prioritize rest and relaxation. See you next week.\n")
+            else:
+                print("No workout generated. Supervisor may have routed to 'end'.")
+            return
+
+        # Show history and safety info
+        history = result.get("workout_history", [])
         fatigue_threshold = result.get("fatigue_threshold", 0.8)
-        
+
         if history:
             print(f"📊 Workout History: {len(history)} previous workout(s)")
             if len(history) > 1:
@@ -337,7 +342,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         
         if max_fatigue > fatigue_threshold:
             print(f"\n🚨 SAFETY ALERT: Max fatigue ({max_fatigue:.2f}) exceeds threshold ({fatigue_threshold:.2f})")
-            print("   Recovery or rest is strongly recommended before next training session.")
+            print("   Next session will be routed to recovery automatically. Rest is recommended.")
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback

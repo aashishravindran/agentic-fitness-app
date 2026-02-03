@@ -42,6 +42,37 @@ except ImportError:
     OllamaModel = None
 
 
+# Keywords that indicate the user needs LLM reasoning (complaints or persona switch)
+COMPLAINT_KEYWORDS = (
+    "sore", "tight", "hurt", "pain", "tired", "fatigued", "exhausted", "stiff",
+    "aching", "burn", "fried", "heavy", "beat up", "cramp", "strained", "injured",
+    "uncomfortable", "numb", "tingling", "swollen", "can't", "cannot", "struggling",
+)
+PERSONA_SWITCH_KEYWORDS = (
+    "yoga", "hiit", "kickboxing", "strength", "iron", "cardio", "mobility",
+    "recovery", "rest day", "stretch", "boxing", "weights", "run",
+    "interval", "meditation", "flow",
+)
+
+
+def needs_llm_reasoning(user_message: str) -> bool:
+    """
+    Return True if the message contains complaints or persona-switch intent,
+    so the Supervisor should call the LLM. Otherwise return False and route
+    directly to the current selected_persona (0 LLM calls for routing).
+    """
+    if not user_message or not user_message.strip():
+        return False
+    text = user_message.lower().strip()
+    # Complaints: any mention of discomfort or limitation
+    if any(kw in text for kw in COMPLAINT_KEYWORDS):
+        return True
+    # Persona switch: user may be asking for a different workout type
+    if any(kw in text for kw in PERSONA_SWITCH_KEYWORDS):
+        return True
+    return False
+
+
 class FatigueUpdate(BaseModel):
     """Single fatigue update (to avoid Dict for Gemini compatibility)."""
     muscle_group: str = Field(description="Muscle group name (e.g., 'legs', 'push', 'hips')")
@@ -206,15 +237,29 @@ def supervisor_node(state: FitnessState) -> Dict:
             "fatigue_scores": fatigue_scores,
         }
     
+    # Persona-to-worker mapping (used for short-circuit and when no messages)
+    persona_to_worker = {
+        "iron": "iron_worker",
+        "yoga": "yoga_worker",
+        "hiit": "hiit_worker",
+        "kickboxing": "kb_worker",
+    }
+
     # If no messages, use default routing based on persona
     if not messages:
-        # Default routing: use current persona
-        persona_to_worker = {
-            "iron": "iron_worker",
-            "yoga": "yoga_worker",
-            "hiit": "hiit_worker",
-            "kickboxing": "kb_worker",
+        return {
+            "next_node": persona_to_worker.get(current_persona, "iron_worker"),
+            "selected_persona": current_persona,
+            "selected_creator": current_persona,
         }
+
+    # Short-circuit: if last user message has no complaints or persona-switch, route directly (0 LLM calls)
+    last_user_message = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user_message = msg.get("content", "") or ""
+            break
+    if not needs_llm_reasoning(last_user_message):
         return {
             "next_node": persona_to_worker.get(current_persona, "iron_worker"),
             "selected_persona": current_persona,

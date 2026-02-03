@@ -36,7 +36,24 @@ from state import FitnessState
 
 
 def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"]:
-    """Route to the next node based on supervisor's decision."""
+    """
+    Route after Decay + History Analysis. Re-apply safety overrides using current state,
+    since History Analysis may have pushed fatigue over threshold (supervisor saw stale fatigue).
+    """
+    # Safety override 1: weekly limit (use current state after decay/history)
+    workouts_completed = state.get("workouts_completed_this_week", 0)
+    max_workouts = state.get("max_workouts_per_week", 4)
+    if workouts_completed >= max_workouts:
+        return "end"
+
+    # Safety override 2: fatigue threshold (fatigue may be higher after history_analysis)
+    fatigue_scores = state.get("fatigue_scores", {})
+    fatigue_threshold = state.get("fatigue_threshold", 0.8)
+    max_fatigue = max(fatigue_scores.values()) if fatigue_scores else 0.0
+    if max_fatigue > fatigue_threshold:
+        return "recovery_worker"
+
+    # Use supervisor's decision otherwise
     next_node = state.get("next_node", "end")
     return next_node
 
