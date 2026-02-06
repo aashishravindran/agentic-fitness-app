@@ -12,10 +12,11 @@ from typing import Dict, List
 from state import FitnessState
 
 # RPE-based fatigue deltas (replaces static +0.5)
-FATIGUE_RPE_HIGH = 0.6   # RPE 8-10
-FATIGUE_RPE_MID = 0.4    # RPE 5-7
-FATIGUE_RPE_LOW = 0.2    # RPE < 5
-DEFAULT_FATIGUE_INCREMENT = 0.5  # when no logs
+# Reduced increments to prevent fatigue from spiking too high after single workout
+FATIGUE_RPE_HIGH = 0.25   # RPE 8-10 (reduced from 0.6)
+FATIGUE_RPE_MID = 0.15    # RPE 5-7 (reduced from 0.4)
+FATIGUE_RPE_LOW = 0.1     # RPE < 5 (reduced from 0.2)
+DEFAULT_FATIGUE_INCREMENT = 0.2  # when no logs (reduced from 0.5)
 
 
 def _rpe_to_fatigue_delta(rpe: float) -> float:
@@ -137,4 +138,6 @@ def finalize_workout_node(state: FitnessState) -> Dict:
         "fatigue_scores": fatigue_scores,
         "active_logs": [],
         "is_working_out": False,
+        "daily_workout": None,  # Clear daily_workout after finalizing
+        "current_workout": None,  # Clear current_workout as well
     }

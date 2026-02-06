@@ -30,6 +30,7 @@ except ImportError:
 from agents.decay import decay_node
 from agents.finalize_workout import finalize_workout_node
 from agents.history_analyzer import history_analysis_node
+from agents.log_rest import log_rest_node
 from agents.recovery_worker import recovery_worker
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
@@ -207,6 +208,15 @@ def run_workout(
                     initial_state["active_logs"] = existing_state.get("active_logs") or []
                 if "is_working_out" in existing_state:
                     initial_state["is_working_out"] = existing_state.get("is_working_out", False)
+                # IMPORTANT: Always override selected_persona with the new persona parameter
+                # This ensures persona changes are respected
+                initial_state["selected_persona"] = persona
+                initial_state["selected_creator"] = persona  # Legacy compatibility
+                # IMPORTANT: Clear daily_workout when starting a new workout request
+                # This ensures we don't keep the old workout when generating a new one
+                initial_state["daily_workout"] = None
+                initial_state["current_workout"] = None
+                initial_state["is_working_out"] = False
     except Exception:
         # If loading fails, continue with provided initial_state
         pass
@@ -252,6 +262,75 @@ def run_workout(
             raise
     
     return result
+
+
+def log_rest_day(
+    user_id: str,
+    checkpoint_dir: str = "checkpoints",
+) -> dict:
+    """
+    Log a rest day and apply fatigue reduction through the graph system.
+    
+    This function uses the graph's checkpoint system to properly update state
+    with rest day fatigue reduction.
+    
+    Args:
+        user_id: User identifier
+        checkpoint_dir: Directory for state persistence
+    
+    Returns:
+        Updated state with reduced fatigue scores
+    """
+    # Build graph with persistence
+    app = build_graph(checkpoint_dir, enable_persistence=True)
+    config = {"configurable": {"thread_id": user_id}}
+    
+    # Get current state
+    try:
+        state_snapshot = app.get_state(config)
+        if state_snapshot:
+            values = getattr(state_snapshot, "values", state_snapshot)
+            if isinstance(values, dict):
+                current_state = values
+            else:
+                current_state = getattr(values, "__dict__", {}) or {}
+        else:
+            # No existing state, create minimal state
+            import time
+            current_state = {
+                "user_id": user_id,
+                "fatigue_scores": {},
+                "last_session_timestamp": time.time(),
+            }
+    except Exception:
+        # If getting state fails, create minimal state
+        import time
+        current_state = {
+            "user_id": user_id,
+            "fatigue_scores": {},
+            "last_session_timestamp": time.time(),
+        }
+    
+    # Apply rest day fatigue reduction
+    rest_result = log_rest_node(current_state)
+    
+    # Update state via graph checkpoint system
+    app.update_state(
+        config,
+        {
+            "fatigue_scores": rest_result.get("fatigue_scores", {}),
+            "last_session_timestamp": rest_result.get("last_session_timestamp"),
+        }
+    )
+    
+    # Return updated state
+    state_snapshot = app.get_state(config)
+    if state_snapshot:
+        values = getattr(state_snapshot, "values", state_snapshot)
+        if isinstance(values, dict):
+            return values
+        return getattr(values, "__dict__", {}) or {}
+    return current_state
 
 
 if __name__ == "__main__":

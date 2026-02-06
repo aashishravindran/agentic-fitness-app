@@ -7,4 +7,9 @@ langgraph>=0.2.57
 langgraph-checkpoint-sqlite>=2.0.0  # SqliteSaver: from langgraph.checkpoint.sqlite
 python-dotenv>=1.0.0  # For .env file support
 
+# Backend API dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+
 
