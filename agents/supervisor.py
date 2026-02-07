@@ -7,7 +7,6 @@ and handles persona switching and fatigue mapping.
 
 from __future__ import annotations
 
-import os
 from typing import Dict, List, Literal
 
 # Load .env file if it exists
@@ -16,30 +15,8 @@ import config  # noqa: F401
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
+from llm import get_supervisor_model
 from state import FitnessState
-
-# Try importing models
-GoogleModel = None
-OpenAIModel = None
-OllamaModel = None
-
-try:
-    from pydantic_ai.models.google import GoogleModel
-except ImportError:
-    try:
-        from pydantic_ai.models.gemini import GeminiModel as GoogleModel
-    except ImportError:
-        GoogleModel = None
-
-try:
-    from pydantic_ai.models.openai import OpenAIModel
-except ImportError:
-    OpenAIModel = None
-
-try:
-    from pydantic_ai.models.ollama import OllamaModel
-except ImportError:
-    OllamaModel = None
 
 
 # Keywords that indicate the user needs LLM reasoning (complaints or persona switch)
@@ -97,52 +74,6 @@ class SupervisorDecision(BaseModel):
     )
 
 
-def get_supervisor_model():
-    """Get LLM model for supervisor (prioritizes Gemini)."""
-    google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
-    
-    if google_api_key and GoogleModel:
-        # Try newer model names that work with v1beta API
-        # Based on pydantic-ai documentation, these are the available models
-        models_to_try = [
-            gemini_model,  # User's preferred model (if valid)
-            "gemini-flash-latest",  # Latest flash model
-            "gemini-2.0-flash",  # Gemini 2.0 flash
-            "gemini-2.5-flash",  # Gemini 2.5 flash
-            "gemini-2.5-pro",  # Gemini 2.5 pro
-            "gemini-1.5-pro",  # Fallback to 1.5 pro
-            "gemini-1.0-pro",  # Older stable version
-        ]
-        last_error = None
-        for model_name in models_to_try:
-            if not model_name:
-                continue
-            try:
-                return GoogleModel(model_name, api_key=google_api_key)
-            except Exception as e:
-                last_error = e
-                # Continue to next model
-                continue
-        
-        # If all models failed, provide helpful error
-        error_msg = f"Failed to initialize any Gemini model. Last error: {last_error}"
-        if last_error:
-            error_msg += f"\nTried models: {', '.join([m for m in models_to_try if m])}"
-        raise ValueError(error_msg)
-    
-    if openai_api_key and OpenAIModel:
-        return OpenAIModel("gpt-4o-mini", api_key=openai_api_key)
-    
-    if OllamaModel:
-        return OllamaModel(ollama_model, base_url=ollama_base_url)
-    
-    raise ValueError("No LLM model available. Set GOOGLE_API_KEY, OPENAI_API_KEY, or use Ollama.")
-
-
 SUPERVISOR_PROMPT = """You are the Supervisor and Safety Governor of a multi-agent fitness coaching system.
 
 Your role:
@@ -186,6 +117,7 @@ def get_supervisor_agent() -> Agent:
             model=get_supervisor_model(),
             system_prompt=SUPERVISOR_PROMPT,
             result_type=SupervisorDecision,
+            retries=3,  # Ollama/local models often need extra retries for structured output
         )
     return _supervisor_agent
 

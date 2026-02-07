@@ -1,14 +1,17 @@
+# Install with: uv pip install -r requirements.txt  (or pip install -r requirements.txt)
 chromadb==0.5.23
 langchain-community==0.3.14
 langchain-text-splitters==0.3.5
 pydantic-ai==0.0.24
-google-generativeai>=0.3.0  # For Gemini support
-langgraph>=0.2.57
-langgraph-checkpoint-sqlite>=2.0.0  # SqliteSaver: from langgraph.checkpoint.sqlite
-python-dotenv>=1.0.0  # For .env file support
+google-generativeai>=0.3.0,<0.8  # Gemini
+ollama>=0.3.0,<0.4  # Ollama local
+openai>=1.0.0  # Ollama fallback / OpenAI
+langgraph>=0.2.57,<0.3
+langgraph-checkpoint-sqlite>=2.0.0
+python-dotenv>=1.0.0
 
-# Backend API dependencies
-fastapi>=0.104.1
+# Backend
+fastapi>=0.104.1,<1.0
 uvicorn[standard]>=0.24.0
 websockets>=12.0
 

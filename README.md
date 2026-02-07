@@ -2,9 +2,9 @@
 
 ## Agentic Fitness Platform with AI Coaching
 
-> 🚀 **New to the project? Start with [QUICKSTART.md](./QUICKSTART.md) for CLI setup or [QUICKSTART_UI.md](./QUICKSTART_UI.md) for UI setup!**
+> 🚀 **New to the project? Start with [QUICKSTART.md](./docs/QUICKSTART.md) for CLI setup or [QUICKSTART_UI.md](./docs/QUICKSTART_UI.md) for UI setup!**
 >
-> 📖 **For comprehensive documentation, see [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)**
+> 📖 **For comprehensive documentation, see [PROJECT_DOCUMENTATION.md](./docs/PROJECT_DOCUMENTATION.md)**
 
 A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
@@ -28,8 +28,12 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
    ollama pull llama3.2  # Optional: only needed if using local Ollama
    ```
 
-2. **Install Python dependencies**:
+2. **Install Python dependencies** (use **uv** for fast installs, or pip):
    ```bash
+   # Recommended: uv (install with: curl -LsSf https://astral.sh/uv/install.sh | sh)
+   uv pip install -r requirements.txt
+
+   # Or with pip
    pip install -r requirements.txt
    ```
 
@@ -59,7 +63,24 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
    ```bash
    # Just make sure Ollama is running
    ```
-   
+
+   **Alternative: DeepSeek**
+   ```bash
+   export LLM_PROVIDER=deepseek
+   export DEEPSEEK_API_KEY=your-deepseek-api-key
+   # Optional: DEEPSEEK_MODEL=deepseek-chat  (or deepseek-reasoner)
+   ```
+   Get a key: https://platform.deepseek.com
+
+   **Alternative: AWS Bedrock**
+   ```bash
+   export LLM_PROVIDER=bedrock
+   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=us-east-1
+   # Optional: BEDROCK_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
+   ```
+
+   **Swapping LLM provider**: Set `LLM_PROVIDER=gemini|openai|bedrock|ollama|deepseek` to force a backend. See `llm.py` and **[GEMINI_SETUP.md](./docs/GEMINI_SETUP.md)**.
+
    **Get a Gemini API key**: https://makersuite.google.com/app/apikey
 
 ## Quick Start
@@ -70,9 +91,10 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 1. **Install dependencies**:
    ```bash
-   # Backend
-   pip install -r requirements.txt
-   
+   # Backend (uv recommended: fast dependency resolution)
+   uv pip install -r requirements.txt
+   # Or: pip install -r requirements.txt
+
    # Frontend
    cd frontend && npm install && cd ..
    ```
@@ -89,7 +111,7 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 4. **Open browser**: `http://localhost:5173`
 
-See **[QUICKSTART_UI.md](./QUICKSTART_UI.md)** for detailed UI setup instructions.
+See **[QUICKSTART_UI.md](./docs/QUICKSTART_UI.md)** for detailed UI setup instructions.
 
 ### Option 2: CLI Interface
 
@@ -122,7 +144,7 @@ See **[QUICKSTART_UI.md](./QUICKSTART_UI.md)** for detailed UI setup instruction
   python main.py db list
   ```
 
-See **[QUICKSTART.md](./QUICKSTART.md)** for detailed CLI instructions.
+See **[QUICKSTART.md](./docs/QUICKSTART.md)** for detailed CLI instructions.
 
 ## Features
 
@@ -136,7 +158,8 @@ See **[QUICKSTART.md](./QUICKSTART.md)** for detailed CLI instructions.
 
 ### 📊 Fatigue Management
 
-- **Time-based decay**: Fatigue reduces automatically over time (3% per hour)
+- **Time-based decay**: Fatigue reduces automatically over time (3% per hour). Can be disabled via `feature_flags.ENABLE_DECAY = False`.
+- **History-based fatigue**: Previous workout fatigue is applied in the graph. Can be disabled via `feature_flags.ENABLE_HISTORY_ANALYZER = False`.
 - **RPE-based accumulation**: Log sets with RPE to build realistic fatigue
 - **Rest day logging**: Log rest days to reduce fatigue by 30%
 - **Fatigue reset**: Reset fatigue scores manually when needed
@@ -163,7 +186,7 @@ See **[QUICKSTART.md](./QUICKSTART.md)** for detailed CLI instructions.
 - **Start fresh**: Option to reset user state when logging in
 - **Switch users**: Easily switch between users with proper state clearing
 
-See **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** for agent system details.
+See **[HIERARCHICAL_SYSTEM.md](./docs/HIERARCHICAL_SYSTEM.md)** for agent system details.
 
 ## Architecture
 
@@ -196,37 +219,41 @@ agentic-fitness-app/
 │   ├── finalize_workout.py # RPE-based fatigue application
 │   └── log_rest.py        # Rest day logging
 ├── creators/              # Creator philosophy markdown files
+├── docs/                  # Documentation (.md except README)
+├── tests/                 # Test suite (test_graph, test_trainer)
 ├── creator_db/            # ChromaDB persistence (auto-created)
-├── checkpoints/          # SQLite checkpoints (auto-created)
-├── graph.py              # LangGraph workflow definition
-├── state.py              # Shared FitnessState TypedDict
-└── main.py               # CLI interface
+├── checkpoints/           # SQLite checkpoints (auto-created)
+├── graph.py               # LangGraph workflow definition
+├── llm.py                 # LLM client interface (Gemini/OpenAI/Bedrock/Ollama/DeepSeek)
+├── feature_flags.py       # Feature flags (decay, history_analyzer)
+├── state.py               # Shared FitnessState TypedDict
+└── main.py                # CLI interface
 ```
 
 ## Documentation
 
 ### Getting Started
-- **[QUICKSTART.md](./QUICKSTART.md)** - CLI setup and usage guide
-- **[QUICKSTART_UI.md](./QUICKSTART_UI.md)** - UI/API setup and quick start
-- **[README_UI.md](./README_UI.md)** - UI architecture and API documentation
+- **[QUICKSTART.md](./docs/QUICKSTART.md)** - CLI setup and usage guide
+- **[QUICKSTART_UI.md](./docs/QUICKSTART_UI.md)** - UI/API setup and quick start
+- **[README_UI.md](./docs/README_UI.md)** - UI architecture and API documentation
 
 ### System Architecture
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - ⭐ Complete system architecture and components
-- **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** - Comprehensive project overview
-- **[HIERARCHICAL_SYSTEM.md](./HIERARCHICAL_SYSTEM.md)** - Multi-agent system implementation
-- **[UI_IMPLEMENTATION_SUMMARY.md](./UI_IMPLEMENTATION_SUMMARY.md)** - UI implementation details
+- **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - ⭐ Complete system architecture and components
+- **[PROJECT_DOCUMENTATION.md](./docs/PROJECT_DOCUMENTATION.md)** - Comprehensive project overview
+- **[HIERARCHICAL_SYSTEM.md](./docs/HIERARCHICAL_SYSTEM.md)** - Multi-agent system implementation
+- **[UI_IMPLEMENTATION_SUMMARY.md](./docs/UI_IMPLEMENTATION_SUMMARY.md)** - UI implementation details
 
 ### Features & Fixes
-- **[FEATURE_LOG_REST.md](./FEATURE_LOG_REST.md)** - Rest day logging feature
-- **[FEATURE_RESET_FATIGUE.md](./FEATURE_RESET_FATIGUE.md)** - Fatigue reset feature
-- **[BUG_FIX_SWITCH_USER.md](./BUG_FIX_SWITCH_USER.md)** - Switch user bug fix
-- **[FIX_FATIGUE_AND_RESET_WORKOUTS.md](./FIX_FATIGUE_AND_RESET_WORKOUTS.md)** - Fatigue and workout reset fixes
+- **[FEATURE_LOG_REST.md](./docs/FEATURE_LOG_REST.md)** - Rest day logging feature
+- **[FEATURE_RESET_FATIGUE.md](./docs/FEATURE_RESET_FATIGUE.md)** - Fatigue reset feature
+- **[BUG_FIX_SWITCH_USER.md](./docs/BUG_FIX_SWITCH_USER.md)** - Switch user bug fix
+- **[FIX_FATIGUE_AND_RESET_WORKOUTS.md](./docs/FIX_FATIGUE_AND_RESET_WORKOUTS.md)** - Fatigue and workout reset fixes
 
 ### Setup & Testing
-- **[TESTING.md](./TESTING.md)** - Testing guide and troubleshooting
-- **[GEMINI_SETUP.md](./GEMINI_SETUP.md)** - Gemini API setup instructions
-- **[FITNESS_RAG_SPEC.md](./FITNESS_RAG_SPEC.md)** - Original technical specification
-- **[PITCH_DECK.md](./PITCH_DECK.md)** - 🎯 Pitch deck for non-technical audiences
+- **[TESTING.md](./docs/TESTING.md)** - Testing guide and troubleshooting
+- **[GEMINI_SETUP.md](./docs/GEMINI_SETUP.md)** - Gemini API setup instructions
+- **[FITNESS_RAG_SPEC.md](./docs/FITNESS_RAG_SPEC.md)** - Original technical specification
+- **[PITCH_DECK.md](./docs/PITCH_DECK.md)** - 🎯 Pitch deck for non-technical audiences
 
 ## API Endpoints
 
@@ -274,5 +301,5 @@ python view_users.py
 python view_users.py <user_id>  # View specific user
 ```
 
-See **[VIEW_USERS.md](./VIEW_USERS.md)** for all database commands.
+See **[VIEW_USERS.md](./docs/VIEW_USERS.md)** for all database commands.
 

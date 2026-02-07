@@ -1,18 +1,17 @@
 import { useState } from 'react'
 
 interface LoginScreenProps {
-  onLogin: (userId: string, goal: string, startFresh: boolean) => void
+  onLogin: (userId: string, goal: string) => void
 }
 
 export default function LoginScreen({ onLogin }: LoginScreenProps) {
   const [userId, setUserId] = useState('')
   const [goal, setGoal] = useState('Build strength and improve fitness')
-  const [isNewUser, setIsNewUser] = useState(true)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (userId.trim()) {
-      onLogin(userId.trim(), goal.trim() || 'Build strength and improve fitness', isNewUser)
+      onLogin(userId.trim(), goal.trim() || 'Build strength and improve fitness')
     }
   }
 
@@ -58,19 +57,6 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             <p className="mt-1 text-xs text-gray-500">
               Describe your fitness goals (optional)
             </p>
-          </div>
-
-          <div className="flex items-center">
-            <input
-              id="newUser"
-              type="checkbox"
-              checked={isNewUser}
-              onChange={(e) => setIsNewUser(e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-            />
-            <label htmlFor="newUser" className="ml-2 block text-sm text-gray-700">
-              New user (start fresh)
-            </label>
           </div>
 
           <button

@@ -76,6 +76,7 @@ def get_recovery_agent() -> Agent:
         model=get_llm_model(),
         system_prompt=RECOVERY_PROMPT,
         result_type=RecoveryPlan,
+        retries=3,  # Ollama/local models often need extra retries for structured output
     )
 
 

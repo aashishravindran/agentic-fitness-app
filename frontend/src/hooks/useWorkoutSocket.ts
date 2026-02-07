@@ -9,7 +9,7 @@ type MessageType =
   | 'FINISH_WORKOUT'
 
 type ClientMessage = 
-  | { type: 'USER_INPUT'; content: string; persona?: string; goal?: string }
+  | { type: 'USER_INPUT'; content: string; persona?: string; goal?: string; max_workouts_per_week?: number }
   | { type: 'LOG_SET'; data: { exercise: string; weight: number; reps: number; rpe: number } }
   | { type: 'APPROVE_SUGGESTION'; approved: boolean }
   | { type: 'RESUME' }

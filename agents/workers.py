@@ -9,7 +9,6 @@ Each worker is a specialized trainer agent that:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -22,29 +21,6 @@ from pydantic_ai import Agent
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from agents.trainer import get_llm_model
 from state import FitnessState
-
-# Import models (same as trainer.py)
-GoogleModel = None
-OpenAIModel = None
-OllamaModel = None
-
-try:
-    from pydantic_ai.models.google import GoogleModel
-except ImportError:
-    try:
-        from pydantic_ai.models.gemini import GeminiModel as GoogleModel
-    except ImportError:
-        GoogleModel = None
-
-try:
-    from pydantic_ai.models.openai import OpenAIModel
-except ImportError:
-    OpenAIModel = None
-
-try:
-    from pydantic_ai.models.ollama import OllamaModel
-except ImportError:
-    OllamaModel = None
 
 
 # ============================================================================
@@ -141,6 +117,7 @@ def get_worker_agent(result_type: type, system_prompt: str) -> Agent:
         model=get_llm_model(),
         system_prompt=system_prompt,
         result_type=result_type,
+        retries=3,  # Ollama/local models often need extra retries for structured output
     )
 
 

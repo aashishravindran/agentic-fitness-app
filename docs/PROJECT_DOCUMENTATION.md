@@ -71,7 +71,7 @@ Instead of generic fitness advice, users select a "Creator" (e.g., "Coach Iron")
 
 ### ✅ Phase 3: Testing & Documentation
 
-- Test scripts (`test_trainer.py`)
+- Test scripts (`tests/test_trainer.py`, `tests/test_graph.py`)
 - Example code (`examples/call_trainer_directly.py`)
 - Comprehensive setup guides (`TESTING.md`, `GEMINI_SETUP.md`)
 - Project documentation (this file)
@@ -473,7 +473,9 @@ agentic-fitness-app/
 ├── main.py               # CLI interface
 ├── ingest.py             # RAG ingestion pipeline
 ├── state.py              # FitnessState definition
-└── test_trainer.py       # Test script
+└── tests/
+    ├── test_trainer.py    # Test script
+    └── test_graph.py     # Full graph test
 ```
 
 ---

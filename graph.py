@@ -34,7 +34,33 @@ from agents.log_rest import log_rest_node
 from agents.recovery_worker import recovery_worker
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
+from feature_flags import ENABLE_DECAY, ENABLE_HISTORY_ANALYZER
 from state import FitnessState
+
+
+def _passthrough_node(state: FitnessState) -> dict:
+    """Identity node: passes state through for routing when decay/history are disabled."""
+    return {}
+
+
+def _after_supervisor(
+    _state: FitnessState,
+) -> Literal["decay", "history_analysis", "pre_route"]:
+    """Route from supervisor: to decay, history_analysis, or pre_route based on feature flags."""
+    if ENABLE_DECAY:
+        return "decay"
+    if ENABLE_HISTORY_ANALYZER:
+        return "history_analysis"
+    return "pre_route"
+
+
+def _after_decay(
+    _state: FitnessState,
+) -> Literal["history_analysis", "pre_route"]:
+    """Route from decay: to history_analysis or pre_route based on feature flags."""
+    if ENABLE_HISTORY_ANALYZER:
+        return "history_analysis"
+    return "pre_route"
 
 
 def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"]:
@@ -73,27 +99,43 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     """
     # Create graph
     workflow = StateGraph(FitnessState)
-    
-    # Add nodes
-    workflow.add_node("supervisor", supervisor_node)  # Entry point for user interactions
-    workflow.add_node("decay", decay_node)  # Runs automatically after supervisor
-    workflow.add_node("history_analysis", history_analysis_node)  # Apply history-based fatigue
+
+    # Routing target: identity node so we can attach conditional_edges
+    workflow.add_node("pre_route", _passthrough_node)
+    workflow.add_node("supervisor", supervisor_node)
+    if ENABLE_DECAY:
+        workflow.add_node("decay", decay_node)
+    if ENABLE_HISTORY_ANALYZER:
+        workflow.add_node("history_analysis", history_analysis_node)
     workflow.add_node("iron_worker", iron_worker)
     workflow.add_node("yoga_worker", yoga_worker)
     workflow.add_node("hiit_worker", hiit_worker)
     workflow.add_node("kb_worker", kb_worker)
     workflow.add_node("recovery_worker", recovery_worker)
-    workflow.add_node("finalize_workout", finalize_workout_node)  # v1: after log, apply RPE fatigue
+    workflow.add_node("finalize_workout", finalize_workout_node)
 
-    # Set entry point - Supervisor handles all user interactions
     workflow.set_entry_point("supervisor")
-    
-    # Flow: Supervisor → Decay → History Analysis → Route to worker
-    workflow.add_edge("supervisor", "decay")
-    workflow.add_edge("decay", "history_analysis")
+
+    # Supervisor → decay | history_analysis | pre_route (based on feature flags)
+    supervisor_targets: dict = {"pre_route": "pre_route"}
+    if ENABLE_HISTORY_ANALYZER:
+        supervisor_targets["history_analysis"] = "history_analysis"
+    if ENABLE_DECAY:
+        supervisor_targets["decay"] = "decay"
+    workflow.add_conditional_edges("supervisor", _after_supervisor, supervisor_targets)
+
+    if ENABLE_DECAY:
+        decay_targets: dict = {"pre_route": "pre_route"}
+        if ENABLE_HISTORY_ANALYZER:
+            decay_targets["history_analysis"] = "history_analysis"
+        workflow.add_conditional_edges("decay", _after_decay, decay_targets)
+
+    if ENABLE_HISTORY_ANALYZER:
+        workflow.add_edge("history_analysis", "pre_route")
+
     workflow.add_conditional_edges(
-        "history_analysis",  # Route from history analysis
-        route_after_supervisor,  # Route based on supervisor's next_node decision
+        "pre_route",
+        route_after_supervisor,
         {
             "iron_worker": "iron_worker",
             "yoga_worker": "yoga_worker",
@@ -135,6 +177,7 @@ def run_workout(
     fatigue_scores: dict,
     messages: list[dict] | None = None,
     checkpoint_dir: str = "checkpoints",
+    max_workouts_per_week: int | None = None,
 ) -> dict:
     """
     Run the complete workout generation workflow.
@@ -161,7 +204,7 @@ def run_workout(
         "fatigue_scores": fatigue_scores,
         "last_session_timestamp": time.time(),
         "workout_history": [],  # Will be loaded from persistence if available
-        "max_workouts_per_week": 4,  # Default: 4 workouts per week
+        "max_workouts_per_week": max_workouts_per_week if max_workouts_per_week is not None else 4,  # Default: 4 workouts per week
         "workouts_completed_this_week": 0,  # Will be loaded from persistence
         "fatigue_threshold": 0.8,  # Default: 0.8 (80% fatigue triggers recovery)
         "messages": messages or [],
@@ -226,9 +269,10 @@ def run_workout(
     try:
         result = app.invoke(initial_state, config)
     except KeyError as e:
-        if "step" in str(e):
-            # Corrupted checkpoint - delete and retry with fresh state (no merged fatigue)
-            print(f"⚠️  Corrupted checkpoint detected. Deleting and retrying...")
+        # Incompatible/corrupted checkpoint (e.g. missing 'pending_sends' from older LangGraph) - delete and retry
+        err = str(e).lower()
+        if "step" in err or "pending_sends" in err or "checkpoint" in err:
+            print(f"⚠️  Corrupted checkpoint detected ({e}). Deleting and retrying...")
             try:
                 from db_utils import delete_user
                 delete_user(user_id, checkpoint_dir)

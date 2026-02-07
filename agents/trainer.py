@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -10,41 +9,7 @@ import config  # noqa: F401
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
-# Try importing models - handle different pydantic-ai versions
-# Initialize to None first to avoid NameError
-GoogleModel = None
-OpenAIModel = None
-OllamaModel = None
-
-# Try importing Google/Gemini model
-try:
-    from pydantic_ai.models.google import GoogleModel
-except ImportError:
-    try:
-        from pydantic_ai.models.gemini import GeminiModel as GoogleModel
-    except ImportError:
-        try:
-            # Some versions might have it directly in models
-            from pydantic_ai.models import GoogleModel
-        except ImportError:
-            GoogleModel = None
-
-# Try importing OpenAI model
-try:
-    from pydantic_ai.models.openai import OpenAIModel
-except ImportError:
-    OpenAIModel = None
-
-# Try importing Ollama model
-try:
-    from pydantic_ai.models.ollama import OllamaModel
-except ImportError:
-    # Fallback: pydantic-ai might use a different structure
-    try:
-        from pydantic_ai.models import OllamaModel
-    except ImportError:
-        OllamaModel = None
-
+from llm import get_llm_model
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from state import FitnessState
 
@@ -106,77 +71,6 @@ IRON_REASONING_PROMPT = """You are the AI Digital Twin of Coach Iron. You are di
 5. **Output Format**: Always return structured JSON that a frontend can easily render. Be specific with tempo notes and rep ranges."""
 
 
-def get_llm_model():
-    """
-    Determine which LLM backend to use based on environment variables.
-    Priority: Gemini (Google) > OpenAI > Ollama (local)
-    """
-    # Check for Gemini/Google API key (priority)
-    google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    # Default to gemini-flash-latest (works with v1beta API)
-    # Will auto-fallback to other models if this one fails
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
-    
-    # Check for OpenAI API key
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    
-    # Check for Ollama (local fallback)
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
-
-    # Priority 1: Gemini/Google
-    if google_api_key and GoogleModel:
-        # Try newer model names that work with v1beta API
-        # Based on pydantic-ai documentation, these are the available models
-        models_to_try = [
-            gemini_model,  # User's preferred model (if valid)
-            "gemini-flash-latest",  # Latest flash model
-            "gemini-2.0-flash",  # Gemini 2.0 flash
-            "gemini-2.5-flash",  # Gemini 2.5 flash
-            "gemini-2.5-pro",  # Gemini 2.5 pro
-            "gemini-1.5-pro",  # Fallback to 1.5 pro
-            "gemini-1.0-pro",  # Older stable version
-        ]
-        
-        last_error = None
-        for model_name in models_to_try:
-            if model_name is None:
-                continue
-            try:
-                return GoogleModel(model_name, api_key=google_api_key)
-            except Exception as e:
-                last_error = e
-                # Continue to next model
-                continue
-        
-        # If all models failed, provide helpful error
-        raise ValueError(
-            f"None of the Gemini models are available with your API key. "
-            f"Tried: {', '.join([m for m in models_to_try if m])}\n"
-            f"Last error: {last_error}\n"
-            f"Check available models at: https://ai.google.dev/models/gemini"
-        ) from last_error
-    
-    # Priority 2: OpenAI
-    if openai_api_key and OpenAIModel:
-        return OpenAIModel("gpt-4o-mini", api_key=openai_api_key)
-    
-    # Priority 3: Ollama (local)
-    if OllamaModel:
-        return OllamaModel(ollama_model, base_url=ollama_base_url)
-    
-    # Fallback errors
-    if GoogleModel:
-        raise ValueError(
-            "No API key found. Set GOOGLE_API_KEY or GEMINI_API_KEY for Gemini, "
-            "or OPENAI_API_KEY for OpenAI, or use Ollama (local)."
-        )
-    raise ImportError(
-        "No LLM models available. Install pydantic-ai with: "
-        "pip install pydantic-ai[google] or pydantic-ai[openai] or pydantic-ai[ollama]"
-    )
-
-
 # Trainer Agent (lazy-initialized to avoid import-time failures)
 _trainer_agent: Agent | None = None
 
@@ -189,6 +83,7 @@ def get_trainer_agent() -> Agent:
             model=get_llm_model(),
             system_prompt=IRON_REASONING_PROMPT,
             result_type=WorkoutPlan,
+            retries=3,  # Ollama/local models often need extra retries for structured output
         )
     return _trainer_agent
 

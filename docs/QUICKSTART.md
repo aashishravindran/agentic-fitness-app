@@ -103,13 +103,13 @@ This indexes all 4 creators:
 **Option A: Test Single Trainer Agent**
 
 ```bash
-python test_trainer.py
+python -m tests.test_trainer
 ```
 
 **Option B: Test Full Multi-Agent System**
 
 ```bash
-python test_graph.py
+python -m tests.test_graph
 ```
 
 This tests all 4 workers (Iron, Yoga, HIIT, Kickboxing).
@@ -266,8 +266,9 @@ agentic-fitness-app/
 │   └── strikeforce_kb.md
 ├── creator_db/             # ChromaDB (auto-created)
 ├── checkpoints/            # State persistence (auto-created)
-├── test_trainer.py         # Test single trainer
-└── test_graph.py           # Test full system
+├── tests/
+│   ├── test_trainer.py     # Test single trainer
+│   └── test_graph.py       # Test full system
 ```
 
 ## Next Steps
@@ -292,7 +293,7 @@ agentic-fitness-app/
 - [ ] Python dependencies installed (`pip install -r requirements.txt`)
 - [ ] `.env` file created with `GOOGLE_API_KEY`
 - [ ] Ran `python main.py ingest` successfully
-- [ ] Ran `python test_trainer.py` successfully
-- [ ] Ran `python test_graph.py` successfully
+- [ ] Ran `python -m tests.test_trainer` successfully
+- [ ] Ran `python -m tests.test_graph` successfully
 
 If all checkboxes pass, you're ready to use the system! 🎉

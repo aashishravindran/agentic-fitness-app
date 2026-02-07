@@ -1,8 +1,14 @@
+import { useEffect, useState } from 'react'
+
 interface StatusBannerProps {
   workoutsCompleted: number
   maxWorkouts: number
   persona: string
   fatigueScores: Record<string, number>
+  userId?: string | null
+  onUpdateMaxWorkouts?: (newMax: number) => void | Promise<void>
+  onViewHistory?: () => void
+  onStartFresh?: () => void
   onResetFatigue?: () => void
   onResetWorkouts?: () => void
 }
@@ -12,9 +18,19 @@ export default function StatusBanner({
   maxWorkouts,
   persona,
   fatigueScores,
+  userId,
+  onUpdateMaxWorkouts,
+  onViewHistory,
+  onStartFresh,
   onResetFatigue,
   onResetWorkouts,
 }: StatusBannerProps) {
+  const [editingMax, setEditingMax] = useState(false)
+  const [editValue, setEditValue] = useState(maxWorkouts)
+  useEffect(() => {
+    setEditValue(maxWorkouts)
+  }, [maxWorkouts])
+
   const progress = maxWorkouts > 0 ? (workoutsCompleted / maxWorkouts) * 100 : 0
   const personaNames: Record<string, string> = {
     iron: 'Coach Iron',
@@ -39,17 +55,86 @@ export default function StatusBanner({
           <p className="text-sm text-gray-600">Active Coach Persona</p>
         </div>
         <div className="text-right">
-          <div className="flex items-center gap-2">
-            <div>
-              <div className="text-2xl font-bold text-blue-600">
-                {workoutsCompleted}/{maxWorkouts}
-              </div>
-              <p className="text-xs text-gray-500">Workouts this week</p>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-1">
+              {editingMax && onUpdateMaxWorkouts ? (
+                <>
+                  <input
+                    type="number"
+                    min={1}
+                    max={7}
+                    value={editValue}
+                    onChange={(e) => setEditValue(Math.min(7, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                    className="w-12 px-1 py-0.5 text-lg font-bold border border-blue-500 rounded"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateMaxWorkouts(editValue)
+                      setEditingMax(false)
+                    }}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditValue(maxWorkouts)
+                      setEditingMax(false)
+                    }}
+                    className="text-xs text-gray-500 hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  {onUpdateMaxWorkouts && (
+                    <button
+                      type="button"
+                      onClick={() => onUpdateMaxWorkouts(Math.max(1, maxWorkouts - 1))}
+                      disabled={maxWorkouts <= 1}
+                      className="w-7 h-7 rounded border border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-sm font-medium"
+                      title="Decrease max workouts per week"
+                      aria-label="Decrease max workouts"
+                    >
+                      −
+                    </button>
+                  )}
+                  <div className="text-2xl font-bold text-blue-600 min-w-[3rem] text-center">
+                    {workoutsCompleted}/{maxWorkouts}
+                  </div>
+                  {onUpdateMaxWorkouts && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateMaxWorkouts(Math.min(7, maxWorkouts + 1))}
+                        disabled={maxWorkouts >= 7}
+                        className="w-7 h-7 rounded border border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-sm font-medium"
+                        title="Increase max workouts per week"
+                        aria-label="Increase max workouts"
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingMax(true)}
+                        className="text-xs text-gray-500 hover:text-blue-600 ml-0.5"
+                        title="Edit max workouts per week"
+                      >
+                        ✎
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </div>
+            <p className="text-xs text-gray-500 w-full text-right">Workouts this week</p>
             {onResetWorkouts && workoutsCompleted > 0 && (
               <button
                 onClick={onResetWorkouts}
-                className="text-xs text-red-600 hover:text-red-700 hover:underline ml-2"
+                className="text-xs text-red-600 hover:text-red-700 hover:underline"
                 title="Reset workouts completed counter to zero"
               >
                 Reset
@@ -57,6 +142,29 @@ export default function StatusBanner({
             )}
           </div>
         </div>
+      </div>
+
+      {/* View history / Start fresh */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {onViewHistory && (
+          <button
+            type="button"
+            onClick={onViewHistory}
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            View past workouts
+          </button>
+        )}
+        {onStartFresh && (
+          <button
+            type="button"
+            onClick={onStartFresh}
+            className="text-sm text-gray-500 hover:text-red-600 hover:underline"
+            title="Delete all history and start over"
+          >
+            Start fresh
+          </button>
+        )}
       </div>
 
       {/* Progress Ring */}

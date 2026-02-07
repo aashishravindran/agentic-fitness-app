@@ -115,7 +115,8 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                 content = data.get("content", "")
                 persona = data.get("persona", "iron")  # Default persona
                 goal = data.get("goal", "Build strength and improve fitness")
-                
+                max_workouts_per_week = data.get("max_workouts_per_week")  # Optional; used for new users
+
                 try:
                     # Run the workout graph
                     logger.info(f"Processing user input for {user_id}: {content[:50]}...")
@@ -123,6 +124,7 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                         content=content,
                         persona=persona,
                         goal=goal,
+                        max_workouts_per_week=max_workouts_per_week,
                     )
                     
                     logger.info(f"Workout generated for {user_id}. Daily workout: {result.get('daily_workout') is not None}")

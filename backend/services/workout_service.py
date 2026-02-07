@@ -66,6 +66,7 @@ class WorkoutService:
         content: str,
         persona: Literal["iron", "yoga", "hiit", "kickboxing"] = "iron",
         goal: str = "Build strength and improve fitness",
+        max_workouts_per_week: Optional[int] = None,
     ) -> Dict:
         """
         Process user input and run the workout graph.
@@ -110,6 +111,7 @@ class WorkoutService:
                     fatigue_scores=fatigue_scores,
                     messages=messages,
                     checkpoint_dir=self.checkpoint_dir,
+                    max_workouts_per_week=max_workouts_per_week,
                 )
             )
             return result

@@ -3,7 +3,8 @@ Test script for the Trainer Agent.
 Run this to verify the trainer_node works with the RAG system.
 
 Usage:
-    python test_trainer.py
+    python -m tests.test_trainer
+    # or from project root: python tests/test_trainer.py
 
 Prerequisites:
     1. Run `python main.py ingest` first to populate ChromaDB
@@ -13,17 +14,17 @@ Prerequisites:
 Quick Start:
     # Step 1: Ingest creator data
     python main.py ingest
-    
+
     # Step 2: Run this test
-    python test_trainer.py
+    python -m tests.test_trainer
 """
 
 import asyncio
 import sys
 from pathlib import Path
 
-# Ensure project root is on path
-_ROOT = Path(__file__).resolve().parent
+# Ensure project root is on path (tests/ is one level below root)
+_ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

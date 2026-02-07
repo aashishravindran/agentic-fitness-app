@@ -59,12 +59,12 @@ Ingested X chunks into collection 'creator_rules'.
 ### Step 4: Test the Trainer Agent
 
 ```bash
-python test_trainer.py
+python -m tests.test_trainer
 ```
 
 ## What the Test Does
 
-The test script (`test_trainer.py`) will:
+The test script (`tests/test_trainer.py`) will:
 
 1. **Create sample state** with:
    - High leg fatigue (0.8) - should trigger adaptation
@@ -143,7 +143,7 @@ EXERCISES:
 
 ## Testing Different Scenarios
 
-You can modify `test_trainer.py` to test different scenarios:
+You can modify `tests/test_trainer.py` to test different scenarios:
 
 ```python
 # Test with low fatigue (should allow heavy leg work)

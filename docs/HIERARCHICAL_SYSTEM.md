@@ -203,7 +203,7 @@ result = run_workout(
 ### 3. Test All Workers
 
 ```bash
-python test_graph.py
+python -m tests.test_graph
 ```
 
 ## Fatigue Mapping Between Personas

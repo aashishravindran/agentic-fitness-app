@@ -11,27 +11,26 @@ function App() {
   const [persona, setPersona] = useState<'iron' | 'yoga' | 'hiit' | 'kickboxing'>('iron')
   const [userId, setUserId] = useState<string | null>(null)
   const [userGoal, setUserGoal] = useState<string>('Build strength and improve fitness')
+  const [maxWorkoutsPerWeek, setMaxWorkoutsPerWeek] = useState(4)
+  const [showHistory, setShowHistory] = useState(false)
+  const [workoutHistory, setWorkoutHistory] = useState<Array<Record<string, unknown>>>([])
   const { connectionStatus, sendMessage } = useWorkoutSocket(userId || '')
-  const { state, workout, isWorkingOut, error, setError, clearState } = useWorkoutStore()
+  const { state, workout, isWorkingOut, error, setError, clearState, setState } = useWorkoutStore()
 
-  const [shouldReset, setShouldReset] = useState(false)
+  useEffect(() => {
+    if (!showHistory || !userId) return
+    const base = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${import.meta.env.VITE_WS_HOST || window.location.hostname}:${import.meta.env.VITE_WS_PORT || (window.location.protocol === 'https:' ? '443' : '8000')}`
+    fetch(`${base}/api/users/${userId}/history`)
+      .then((res) => res.json())
+      .then((data) => setWorkoutHistory(data.workout_history || []))
+      .catch(() => setWorkoutHistory([]))
+  }, [showHistory, userId])
 
-  const handleLogin = (newUserId: string, goal: string, startFresh: boolean) => {
-    // Clear old state when logging in
+  const handleLogin = (newUserId: string, goal: string) => {
     clearState()
     setUserId(newUserId)
     setUserGoal(goal)
-    setShouldReset(startFresh)
   }
-
-  // Reset user when connected and reset flag is set
-  useEffect(() => {
-    if (connectionStatus === 'connected' && shouldReset) {
-      sendMessage({ type: 'RESET_USER' })
-      setShouldReset(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionStatus, shouldReset])
 
   // Show login screen if not logged in
   if (!userId) {
@@ -46,6 +45,7 @@ function App() {
       content: userInput,
       persona: persona,
       goal: userGoal,
+      max_workouts_per_week: maxWorkoutsPerWeek,
     })
     setUserInput('')
   }
@@ -74,9 +74,23 @@ function App() {
         {/* Status Banner */}
         <StatusBanner
           workoutsCompleted={state?.workouts_completed_this_week || 0}
-          maxWorkouts={state?.max_workouts_per_week || 4}
+          maxWorkouts={state?.max_workouts_per_week ?? maxWorkoutsPerWeek}
           persona={state?.selected_persona || 'iron'}
           fatigueScores={state?.fatigue_scores || {}}
+          userId={userId}
+          onUpdateMaxWorkouts={async (newMax: number) => {
+            const base = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${import.meta.env.VITE_WS_HOST || window.location.hostname}:${import.meta.env.VITE_WS_PORT || (window.location.protocol === 'https:' ? '443' : '8000')}`
+            const res = await fetch(`${base}/api/users/${userId}/settings`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ max_workouts_per_week: newMax }),
+            })
+            if (res.ok) {
+              const updated = await res.json()
+              if (updated) setState(updated)
+              setMaxWorkoutsPerWeek(newMax)
+            }
+          }}
           onResetFatigue={() => {
             if (window.confirm(`Reset all fatigue scores to zero for ${userId}? This will clear your current fatigue levels.`)) {
               sendMessage({ type: 'RESET_FATIGUE' })
@@ -87,6 +101,12 @@ function App() {
               sendMessage({ type: 'RESET_WORKOUTS' })
             }
           }}
+          onViewHistory={() => setShowHistory(true)}
+          onStartFresh={state ? () => {
+            if (window.confirm('Start completely fresh? This will delete all your workout history and progress for this account.')) {
+              sendMessage({ type: 'RESET_USER' })
+            }
+          } : undefined}
         />
 
         {/* Connection Status */}
@@ -146,8 +166,8 @@ function App() {
               setUserInput('')
               setPersona('iron')
               setUserGoal('Build strength and improve fitness')
-              setShouldReset(false)
-              // Set userId to null last to trigger WebSocket disconnect and state clearing
+              setMaxWorkoutsPerWeek(4)
+              setShowHistory(false)
               setUserId(null)
             }}
             className="text-sm text-blue-600 hover:text-blue-700"
@@ -215,6 +235,75 @@ function App() {
           <div className="text-center py-12 text-gray-500">
             <p className="text-lg">No active workout</p>
             <p className="text-sm mt-2">Send a message above to start a workout session</p>
+          </div>
+        )}
+
+        {/* Past workouts modal */}
+        {showHistory && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowHistory(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-gray-800">Past workouts</h2>
+                <button type="button" onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                {workoutHistory.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No past workouts yet.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {workoutHistory.map((w, i) => {
+                      const title = (w as Record<string, string>).focus_area || (w as Record<string, string>).focus_system || (w as Record<string, string>).focus_attribute || 'Workout'
+                      const exercises = (w as Record<string, unknown>).exercises as Array<Record<string, unknown>> | undefined
+                      const poses = (w as Record<string, unknown>).poses as Array<Record<string, unknown>> | undefined
+                      return (
+                        <li key={i} className="border border-gray-200 rounded-lg p-3 text-left">
+                          <div className="font-medium text-gray-800">{title}</div>
+                          {Array.isArray(exercises) && exercises.length > 0 && (
+                            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+                              {exercises.map((ex, j) => {
+                                const name = (ex.exercise_name as string) || (ex.pose_name as string) || `Exercise ${j + 1}`
+                                const detail = ex.sets != null && ex.reps != null
+                                  ? `${ex.sets} × ${ex.reps}`
+                                  : ex.work_duration != null
+                                    ? String(ex.work_duration)
+                                    : ex.round_duration != null
+                                      ? String(ex.round_duration)
+                                      : ex.duration != null
+                                        ? String(ex.duration)
+                                        : ''
+                                return (
+                                  <li key={j} className="flex justify-between gap-2">
+                                    <span>{name}</span>
+                                    {detail && <span className="text-gray-500">{detail}</span>}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )}
+                          {Array.isArray(poses) && poses.length > 0 && (
+                            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+                              {poses.map((po, j) => {
+                                const name = (po.pose_name as string) || `Pose ${j + 1}`
+                                const detail = po.duration != null ? String(po.duration) : ''
+                                return (
+                                  <li key={j} className="flex justify-between gap-2">
+                                    <span>{name}</span>
+                                    {detail && <span className="text-gray-500">{detail}</span>}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )}
+                          {(!exercises?.length && !poses?.length) && (
+                            <p className="mt-1 text-sm text-gray-500">No exercises listed</p>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
