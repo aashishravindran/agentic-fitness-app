@@ -2,7 +2,9 @@
 
 ## Agentic Fitness Platform with AI Coaching
 
-> 🚀 **New to the project? Start with [QUICKSTART.md](./docs/QUICKSTART.md) for CLI setup or [QUICKSTART_UI.md](./docs/QUICKSTART_UI.md) for UI setup!**
+> 🚀 **New to the project? Start with [QUICKSTART.md](./docs/QUICKSTART.md) for CLI setup or [QUICKSTART_UI.md](./docs/QUICKSTART_UI.md) for API documentation.**
+>
+> 🎨 **UI:** The React frontend lives in a separate repo: [SuperSetUI](https://github.com/aashishravindran/SuperSetUI)
 >
 > 📖 **For comprehensive documentation, see [PROJECT_DOCUMENTATION.md](./docs/PROJECT_DOCUMENTATION.md)**
 
@@ -10,7 +12,7 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 - **RAG System**: Ingesting creator markdown files, chunking + embedding locally via Ollama, persisting to ChromaDB
 - **Multi-Agent System**: Supervisor routes to specialist workers (Iron, Yoga, HIIT, Kickboxing)
-- **Real-Time UI**: React frontend with WebSocket support for live workout sessions
+- **Real-Time API**: WebSocket support for live workout sessions (consumed by [SuperSetUI](https://github.com/aashishravindran/SuperSetUI))
 - **Fatigue Tracking**: Time-based decay, RPE-based accumulation, and rest day recovery
 - **State Persistence**: SQLite checkpoints for per-user workout history and progress
 
@@ -85,35 +87,22 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 ## Quick Start
 
-### Option 1: Web UI (Recommended)
-
-**Full-stack application with modern React UI:**
+### Backend API
 
 1. **Install dependencies**:
    ```bash
-   # Backend (uv recommended: fast dependency resolution)
    uv pip install -r requirements.txt
    # Or: pip install -r requirements.txt
-
-   # Frontend
-   cd frontend && npm install && cd ..
    ```
 
-2. **Start backend** (Terminal 1):
+2. **Start backend**:
    ```bash
    python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-3. **Start frontend** (Terminal 2):
-   ```bash
-   cd frontend && npm run dev
-   ```
+3. **Use the UI**: Point [SuperSetUI](https://github.com/aashishravindran/SuperSetUI) at `http://localhost:8000`, or use the CLI below.
 
-4. **Open browser**: `http://localhost:5173`
-
-See **[QUICKSTART_UI.md](./docs/QUICKSTART_UI.md)** for detailed UI setup instructions.
-
-### Option 2: CLI Interface
+### CLI Interface
 
 **Command-line interface for testing and development:**
 
@@ -172,14 +161,6 @@ See **[QUICKSTART.md](./docs/QUICKSTART.md)** for detailed CLI instructions.
 - **Weekly tracking**: Track workouts completed per week
 - **Persona switching**: Switch between Iron/Yoga/HIIT/Kickboxing on the fly
 
-### 🎨 Modern UI
-
-- **Mobile-first design**: Responsive React UI with Tailwind CSS
-- **Real-time updates**: WebSocket connection for live state sync
-- **Status dashboard**: See weekly progress, fatigue scores, and coach persona
-- **RPE selector**: Tactile slider with color-coded feedback
-- **Nudge system**: Agent suggestions with Accept/Ignore options
-
 ### 🔒 User Management
 
 - **Per-user state**: Each user has isolated workout history and fatigue
@@ -190,12 +171,13 @@ See **[HIERARCHICAL_SYSTEM.md](./docs/HIERARCHICAL_SYSTEM.md)** for agent system
 
 ## Architecture
 
-### Full-Stack Components
+### Components
 
 - **Backend (FastAPI)**: WebSocket server for real-time workout sessions, REST API for status/history/settings
-- **Frontend (React + TypeScript)**: Modern UI with Tailwind CSS, Zustand state management, WebSocket hooks
 - **Agents (LangGraph)**: Multi-agent system with Supervisor, Workers, Decay, and History Analysis nodes
 - **Persistence**: SQLite checkpoints for user state, ChromaDB for RAG storage
+
+*UI: [SuperSetUI](https://github.com/aashishravindran/SuperSetUI) – separate React frontend*
 
 ### Project Structure
 
@@ -205,12 +187,6 @@ agentic-fitness-app/
 │   ├── main.py            # API entry point & WebSocket handlers
 │   ├── routes/            # REST endpoints (status, history, settings)
 │   └── services/          # LangGraph integration layer
-├── frontend/              # React Application
-│   ├── src/
-│   │   ├── components/    # UI components (StatusBanner, WorkoutCard, RPESelector, etc.)
-│   │   ├── hooks/         # Custom hooks (useWorkoutSocket)
-│   │   └── store/         # Zustand state management
-│   └── package.json
 ├── agents/                # LangGraph Agents
 │   ├── supervisor.py      # Safety Governor & Router
 │   ├── workers.py         # Specialist Workers (Iron, Yoga, HIIT, Kickboxing)
@@ -234,15 +210,12 @@ agentic-fitness-app/
 
 ### Getting Started
 - **[QUICKSTART.md](./docs/QUICKSTART.md)** - CLI setup and usage guide
-- **[QUICKSTART_UI.md](./docs/QUICKSTART_UI.md)** - UI/API setup and quick start
-- **[README_UI.md](./docs/README_UI.md)** - UI architecture and API documentation
+- **[QUICKSTART_UI.md](./docs/QUICKSTART_UI.md)** - API setup and curl/WebSocket documentation
 
 ### System Architecture
 - **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - ⭐ Complete system architecture and components
 - **[PROJECT_DOCUMENTATION.md](./docs/PROJECT_DOCUMENTATION.md)** - Comprehensive project overview
 - **[HIERARCHICAL_SYSTEM.md](./docs/HIERARCHICAL_SYSTEM.md)** - Multi-agent system implementation
-- **[UI_IMPLEMENTATION_SUMMARY.md](./docs/UI_IMPLEMENTATION_SUMMARY.md)** - UI implementation details
-
 ### Features & Fixes
 - **[FEATURE_LOG_REST.md](./docs/FEATURE_LOG_REST.md)** - Rest day logging feature
 - **[FEATURE_RESET_FATIGUE.md](./docs/FEATURE_RESET_FATIGUE.md)** - Fatigue reset feature
@@ -290,7 +263,7 @@ Real-time connection for workout sessions.
 | `/api/users/{id}/history` | GET | Workout history |
 | `/api/users/{id}/settings` | PATCH | Update max_workouts_per_week, fatigue_threshold |
 
-**Workout flow**: Generate workout → graph interrupts with workout → optionally log sets → finish workout to apply fatigue and save. Same flow for REST and WebSocket. See [QUICKSTART_UI.md](./docs/QUICKSTART_UI.md) for curl examples.
+**Workout flow**: Generate workout → graph interrupts with workout → optionally log sets → finish workout to apply fatigue and save. Same flow for REST and WebSocket.
 
 ## Database Management
 
