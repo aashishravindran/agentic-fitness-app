@@ -25,6 +25,18 @@ from state import FitnessState
 logger = logging.getLogger(__name__)
 
 
+def _get_exercise_by_id(workout: Dict, exercise_id: str) -> Optional[Dict]:
+    """Look up an exercise/pose/activity by id in the workout."""
+    for key in ("exercises", "poses", "activities"):
+        items = workout.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict) and item.get("id") == exercise_id:
+                return item
+    return None
+
+
 class WorkoutService:
     """Service for managing workout sessions with LangGraph."""
     
@@ -67,6 +79,7 @@ class WorkoutService:
         persona: Literal["iron", "yoga", "hiit", "kickboxing"] = "iron",
         goal: str = "Build strength and improve fitness",
         max_workouts_per_week: Optional[int] = None,
+        subscribed_personas: Optional[List[str]] = None,
     ) -> Dict:
         """
         Process user input and run the workout graph.
@@ -112,6 +125,7 @@ class WorkoutService:
                     messages=messages,
                     checkpoint_dir=self.checkpoint_dir,
                     max_workouts_per_week=max_workouts_per_week,
+                    subscribed_personas=subscribed_personas,
                 )
             )
             return result
@@ -121,7 +135,8 @@ class WorkoutService:
     
     async def log_set(
         self,
-        exercise_name: str,
+        exercise_name: Optional[str] = None,
+        exercise_id: Optional[str] = None,
         weight: float = 0.0,
         reps: int = 0,
         rpe: int = 5,
@@ -129,7 +144,8 @@ class WorkoutService:
         """
         Log a set for an exercise.
         
-        Updates the active_logs in state and returns updated state.
+        Prefer exercise_id for reliable matching. If exercise_id is provided,
+        the display name is resolved from the workout; otherwise exercise_name is used.
         """
         state = await self.get_current_state()
         if not state:
@@ -138,6 +154,19 @@ class WorkoutService:
         workout = state.get("daily_workout")
         if not workout:
             raise ValueError("No active workout")
+        
+        # Resolve display name: from exercise_id lookup, or use exercise_name
+        display_name: Optional[str] = None
+        if exercise_id:
+            item = _get_exercise_by_id(workout, exercise_id)
+            if item:
+                display_name = item.get("exercise_name") or item.get("pose_name") or item.get("activity_name") or ""
+            if not display_name:
+                raise ValueError(f"Exercise id '{exercise_id}' not found in current workout")
+        else:
+            display_name = (exercise_name or "").strip()
+            if not display_name:
+                raise ValueError("Provide either exercise_id or exercise name")
         
         # Infer default muscle group from workout focus
         focus = (
@@ -165,28 +194,35 @@ class WorkoutService:
         elif "cns" in focus:
             default_muscle = "cns"
         
-        # Update active_logs
+        # Update active_logs: match by exercise_id first, else by exercise_name
         active_logs = list(state.get("active_logs", []))
         found = False
         
         for entry in active_logs:
-            if (entry.get("exercise_name") or "").strip().lower() == exercise_name.strip().lower():
+            match_by_id = exercise_id and entry.get("exercise_id") == exercise_id
+            match_by_name = not match_by_id and (entry.get("exercise_name") or "").strip().lower() == display_name.strip().lower()
+            if match_by_id or match_by_name:
                 sets_list = entry.get("sets", [])
                 sets_list.append({"weight": weight, "reps": reps, "rpe": rpe})
                 entry["sets"] = sets_list
                 entry["average_rpe"] = round(
                     sum(s.get("rpe", 5) for s in sets_list) / len(sets_list), 2
                 )
+                if exercise_id:
+                    entry["exercise_id"] = exercise_id
                 found = True
                 break
         
         if not found:
-            active_logs.append({
-                "exercise_name": exercise_name.strip(),
+            new_entry: Dict = {
+                "exercise_name": display_name.strip(),
                 "muscle_group": default_muscle,
                 "sets": [{"weight": weight, "reps": reps, "rpe": rpe}],
                 "average_rpe": float(rpe),
-            })
+            }
+            if exercise_id:
+                new_entry["exercise_id"] = exercise_id
+            active_logs.append(new_entry)
         
         # Update state
         loop = asyncio.get_event_loop()

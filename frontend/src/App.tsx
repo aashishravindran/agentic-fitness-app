@@ -50,16 +50,11 @@ function App() {
     setUserInput('')
   }
 
-  const handleLogSet = (exerciseName: string, weight: number, reps: number, rpe: number) => {
-    sendMessage({
-      type: 'LOG_SET',
-      data: {
-        exercise: exerciseName,
-        weight: weight,
-        reps: reps,
-        rpe: rpe,
-      },
-    })
+  const handleLogSet = (exerciseName: string, exerciseId: string | null, weight: number, reps: number, rpe: number) => {
+    const data: Record<string, unknown> = { weight, reps, rpe }
+    if (exerciseId) data.exercise_id = exerciseId
+    else data.exercise = exerciseName
+    sendMessage({ type: 'LOG_SET', data })
   }
 
   const handleFinishWorkout = () => {

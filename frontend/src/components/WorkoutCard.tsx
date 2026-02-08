@@ -4,7 +4,7 @@ import RPESelector from './RPESelector'
 interface WorkoutCardProps {
   workout: any
   isWorkingOut: boolean
-  onLogSet: (exerciseName: string, weight: number, reps: number, rpe: number) => void
+  onLogSet: (exerciseName: string, exerciseId: string | null, weight: number, reps: number, rpe: number) => void
   onFinishWorkout: () => void
 }
 
@@ -15,6 +15,7 @@ export default function WorkoutCard({
   onFinishWorkout,
 }: WorkoutCardProps) {
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null)
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
   const [weight, setWeight] = useState<string>('')
   const [reps, setReps] = useState<string>('')
   const [rpe, setRpe] = useState<number>(5)
@@ -26,7 +27,7 @@ export default function WorkoutCard({
     const repsNum = parseInt(reps) || 0
     
     if (repsNum > 0 && rpe >= 1 && rpe <= 10) {
-      onLogSet(selectedExercise, weightNum, repsNum, rpe)
+      onLogSet(selectedExercise, selectedExerciseId, weightNum, repsNum, rpe)
       setWeight('')
       setReps('')
       setRpe(5)
@@ -73,7 +74,10 @@ export default function WorkoutCard({
                   </div>
                   {isWorkingOut && (
                     <button
-                      onClick={() => setSelectedExercise(exercise.exercise_name)}
+                      onClick={() => {
+                        setSelectedExercise(exercise.exercise_name)
+                        setSelectedExerciseId(exercise.id ?? null)
+                      }}
                       className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
                     >
                       Log Set

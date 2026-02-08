@@ -27,7 +27,17 @@ class FitnessState(TypedDict):
     selected_persona: Literal["iron", "yoga", "hiit", "kickboxing"]
     selected_creator: str  # Legacy: kept for backward compatibility
     next_node: str  # Node to route to next (set by supervisor)
-    
+
+    # Biometric & Onboarding
+    height_cm: Optional[float]
+    weight_kg: Optional[float]
+    fitness_level: Optional[str]  # e.g., "Beginner", "Intermediate", "Advanced"
+    is_onboarded: bool  # If True, recommender is skipped during standard workflows
+    recommended_personas: Optional[List[str]]  # Up to 2 AI-suggested personas (creator keys)
+    recommended_persona: Optional[str]  # Legacy: first of recommended_personas
+    recommendation_rationale: Optional[str]  # Brief explanation for the recommendation
+    subscribed_personas: Optional[List[str]]  # Personas user has subscribed to (can be multiple)
+
     # Persistent State
     fatigue_scores: Dict[str, float]  # e.g., {"legs": 0.8, "push": 0.1, "spine": 0.3}
     last_session_timestamp: float  # Unix timestamp of last session

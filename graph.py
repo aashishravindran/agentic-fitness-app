@@ -32,9 +32,10 @@ from agents.finalize_workout import finalize_workout_node
 from agents.history_analyzer import history_analysis_node
 from agents.log_rest import log_rest_node
 from agents.recovery_worker import recovery_worker
+from agents.recommender import persona_recommendation_node
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
-from feature_flags import ENABLE_DECAY, ENABLE_HISTORY_ANALYZER
+from feature_flags import ENABLE_DECAY, ENABLE_HISTORY_ANALYZER, ENABLE_PERSONA_RECOMMENDER
 from state import FitnessState
 
 
@@ -61,6 +62,15 @@ def _after_decay(
     if ENABLE_HISTORY_ANALYZER:
         return "history_analysis"
     return "pre_route"
+
+
+def _check_onboarding(state: FitnessState) -> Literal["recommender", "supervisor"]:
+    """Conditional entry: route to recommender if not onboarded, else supervisor."""
+    if not ENABLE_PERSONA_RECOMMENDER:
+        return "supervisor"
+    if state.get("is_onboarded", False):
+        return "supervisor"
+    return "recommender"
 
 
 def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"]:
@@ -103,6 +113,8 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     # Routing target: identity node so we can attach conditional_edges
     workflow.add_node("pre_route", _passthrough_node)
     workflow.add_node("supervisor", supervisor_node)
+    if ENABLE_PERSONA_RECOMMENDER:
+        workflow.add_node("recommender", persona_recommendation_node)
     if ENABLE_DECAY:
         workflow.add_node("decay", decay_node)
     if ENABLE_HISTORY_ANALYZER:
@@ -114,7 +126,15 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_node("recovery_worker", recovery_worker)
     workflow.add_node("finalize_workout", finalize_workout_node)
 
-    workflow.set_entry_point("supervisor")
+    # Conditional entry: recommender for non-onboarded users, else supervisor
+    if ENABLE_PERSONA_RECOMMENDER:
+        workflow.set_conditional_entry_point(
+            _check_onboarding,
+            {"recommender": "recommender", "supervisor": "supervisor"},
+        )
+        workflow.add_edge("recommender", "supervisor")
+    else:
+        workflow.set_entry_point("supervisor")
 
     # Supervisor → decay | history_analysis | pre_route (based on feature flags)
     supervisor_targets: dict = {"pre_route": "pre_route"}
@@ -162,12 +182,107 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
         memory = SqliteSaver(conn)
         app = workflow.compile(
             checkpointer=memory,
-            interrupt_after=["iron_worker", "yoga_worker", "hiit_worker", "kb_worker"],
+            interrupt_after=["iron_worker", "yoga_worker", "hiit_worker", "kb_worker"],  # Pause after worker, before finalize (user can log sets)
         )
     else:
         app = workflow.compile()
 
     return app
+
+
+def build_onboard_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = True):
+    """
+    Build a minimal graph for onboarding: recommender only.
+    Used by POST /users/{id}/onboard to run the persona recommender.
+    """
+    workflow = StateGraph(FitnessState)
+    workflow.add_node("recommender", persona_recommendation_node)
+    workflow.set_entry_point("recommender")
+    workflow.add_edge("recommender", END)
+
+    if enable_persistence and SQLITE_AVAILABLE and SqliteSaver:
+        Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        db_path = Path(checkpoint_dir) / "checkpoints.db"
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        memory = SqliteSaver(conn)
+        return workflow.compile(checkpointer=memory)
+    return workflow.compile()
+
+
+def run_onboard(
+    user_id: str,
+    height_cm: float,
+    weight_kg: float,
+    goal: str,
+    fitness_level: str = "Intermediate",
+    checkpoint_dir: str = "checkpoints",
+) -> dict:
+    """
+    Run the onboarding flow: recommender suggests a persona based on biometrics.
+
+    Creates or updates state with biometric data, runs recommender, returns recommendation.
+    """
+    import time
+
+    initial_state: FitnessState = {
+        "user_id": user_id,
+        "selected_persona": "iron",  # Default until recommender runs
+        "selected_creator": "coach_iron",
+        "next_node": "",
+        "height_cm": height_cm,
+        "weight_kg": weight_kg,
+        "goal": goal,
+        "fitness_level": fitness_level,
+        "is_onboarded": False,
+        "recommended_personas": None,
+        "recommended_persona": None,
+        "subscribed_personas": None,
+        "fatigue_scores": {},
+        "last_session_timestamp": time.time(),
+        "workout_history": [],
+        "max_workouts_per_week": 4,
+        "workouts_completed_this_week": 0,
+        "fatigue_threshold": 0.8,
+        "messages": [],
+        "active_philosophy": None,
+        "retrieved_rules": [],
+        "retrieved_philosophy": "",
+        "current_workout": None,
+        "daily_workout": None,
+        "is_approved": False,
+        "active_logs": [],
+        "is_working_out": False,
+    }
+
+    app = build_onboard_graph(checkpoint_dir, enable_persistence=True)
+    config = {"configurable": {"thread_id": user_id}}
+
+    # Merge existing state if present (preserve fatigue, etc.)
+    if SQLITE_AVAILABLE and SqliteSaver:
+        from db_utils import get_user_state
+        existing = get_user_state(user_id, checkpoint_dir)
+        if existing:
+            if existing.get("fatigue_scores"):
+                initial_state["fatigue_scores"] = existing["fatigue_scores"]
+            if existing.get("max_workouts_per_week"):
+                initial_state["max_workouts_per_week"] = existing["max_workouts_per_week"]
+            if existing.get("workouts_completed_this_week") is not None:
+                initial_state["workouts_completed_this_week"] = existing["workouts_completed_this_week"]
+            if existing.get("fatigue_threshold"):
+                initial_state["fatigue_threshold"] = existing["fatigue_threshold"]
+
+    try:
+        result = app.invoke(initial_state, config)
+        return result
+    except KeyError as e:
+        # Corrupted/incompatible checkpoint (e.g. missing 'pending_sends' from older LangGraph)
+        err = str(e).lower()
+        if "pending_sends" in err or "step" in err or "checkpoint" in err:
+            from db_utils import delete_user
+            delete_user(user_id, checkpoint_dir)
+            result = app.invoke(initial_state, config)
+            return result
+        raise
 
 
 def run_workout(
@@ -178,6 +293,7 @@ def run_workout(
     messages: list[dict] | None = None,
     checkpoint_dir: str = "checkpoints",
     max_workouts_per_week: int | None = None,
+    subscribed_personas: list[str] | None = None,
 ) -> dict:
     """
     Run the complete workout generation workflow.
@@ -195,12 +311,14 @@ def run_workout(
     """
     import time
     
-    # Build initial state with safety defaults
+    # Build initial state with safety defaults.
+    # is_onboarded=True when persona is explicitly provided (skip recommender for CLI/API).
     initial_state: FitnessState = {
         "user_id": user_id,
         "selected_persona": persona,
         "selected_creator": persona,  # Legacy compatibility
         "next_node": "",
+        "is_onboarded": True,
         "fatigue_scores": fatigue_scores,
         "last_session_timestamp": time.time(),
         "workout_history": [],  # Will be loaded from persistence if available
@@ -218,7 +336,9 @@ def run_workout(
         "active_logs": [],
         "is_working_out": False,
     }
-    
+    if subscribed_personas is not None:
+        initial_state["subscribed_personas"] = subscribed_personas
+
     # Build and run graph with persistence enabled
     app = build_graph(checkpoint_dir, enable_persistence=True)
     
@@ -260,6 +380,20 @@ def run_workout(
                 initial_state["daily_workout"] = None
                 initial_state["current_workout"] = None
                 initial_state["is_working_out"] = False
+                if "is_onboarded" in existing_state:
+                    initial_state["is_onboarded"] = existing_state["is_onboarded"]
+                if "recommended_persona" in existing_state:
+                    initial_state["recommended_persona"] = existing_state["recommended_persona"]
+                if "recommended_personas" in existing_state:
+                    initial_state["recommended_personas"] = existing_state["recommended_personas"]
+                if "subscribed_personas" in existing_state:
+                    initial_state["subscribed_personas"] = existing_state["subscribed_personas"]
+                if "height_cm" in existing_state:
+                    initial_state["height_cm"] = existing_state.get("height_cm")
+                if "weight_kg" in existing_state:
+                    initial_state["weight_kg"] = existing_state.get("weight_kg")
+                if "fitness_level" in existing_state:
+                    initial_state["fitness_level"] = existing_state.get("fitness_level")
     except Exception:
         # If loading fails, continue with provided initial_state
         pass
@@ -282,6 +416,7 @@ def run_workout(
                     "selected_persona": persona,
                     "selected_creator": persona,
                     "next_node": "",
+                    "is_onboarded": True,
                     "fatigue_scores": fatigue_scores,
                     "last_session_timestamp": time.time(),
                     "workout_history": [],

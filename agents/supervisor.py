@@ -94,7 +94,8 @@ Your role:
    - "yoga" → yoga_worker (mobility: spine/hips/shoulders)
    - "hiit" → hiit_worker (cardio: cardio/cns)
    - "kickboxing" → kb_worker (coordination: coordination/speed)
-   - "recovery_worker" → For rest days, active recovery, or when fatigue is too high
+   - "recovery_worker" → For rest days, active recovery, or when fatigue is too high (always allowed)
+   - When user has multiple subscribed personas, pick the worker that best fits the user's message.
 
 **Fatigue Mapping Between Personas:**
 - Iron's "legs" fatigue → Yoga's "hips/spine" restriction
@@ -169,7 +170,7 @@ def supervisor_node(state: FitnessState) -> Dict:
             "fatigue_scores": fatigue_scores,
         }
     
-    # Persona-to-worker mapping (used for short-circuit and when no messages)
+    # Persona-to-worker mapping
     persona_to_worker = {
         "iron": "iron_worker",
         "yoga": "yoga_worker",
@@ -177,25 +178,51 @@ def supervisor_node(state: FitnessState) -> Dict:
         "kickboxing": "kb_worker",
     }
 
-    # If no messages, use default routing based on persona
+    # Restrict to workers matching subscribed_personas (if set)
+    subscribed = state.get("subscribed_personas") or []
+    if subscribed:
+        allowed_workers = {persona_to_worker.get(p) for p in subscribed if p in persona_to_worker}
+        allowed_workers.discard(None)
+        if not allowed_workers:
+            allowed_workers = {"iron_worker", "yoga_worker", "hiit_worker", "kb_worker"}  # Fallback
+    else:
+        allowed_workers = {"iron_worker", "yoga_worker", "hiit_worker", "kb_worker"}
+
+    def _pick_from_subscribed() -> tuple:
+        """Pick worker from subscribed; use current_persona if in subscribed, else first subscribed."""
+        if current_persona in subscribed:
+            w = persona_to_worker.get(current_persona, "iron_worker")
+            if w in allowed_workers:
+                return w, current_persona
+        for p in subscribed:
+            w = persona_to_worker.get(p)
+            if w and w in allowed_workers:
+                return w, p
+        # Fallback
+        p = subscribed[0] if subscribed else current_persona
+        return persona_to_worker.get(p, "iron_worker"), p
+
+    # If no messages, use default routing from subscribed personas
     if not messages:
+        next_worker, chosen_persona = _pick_from_subscribed()
         return {
-            "next_node": persona_to_worker.get(current_persona, "iron_worker"),
-            "selected_persona": current_persona,
-            "selected_creator": current_persona,
+            "next_node": next_worker,
+            "selected_persona": chosen_persona,
+            "selected_creator": chosen_persona,
         }
 
-    # Short-circuit: if last user message has no complaints or persona-switch, route directly (0 LLM calls)
+    # Short-circuit: if last user message has no complaints or persona-switch, route directly
     last_user_message = ""
     for msg in reversed(messages):
         if msg.get("role") == "user":
             last_user_message = msg.get("content", "") or ""
             break
     if not needs_llm_reasoning(last_user_message):
+        next_worker, chosen_persona = _pick_from_subscribed()
         return {
-            "next_node": persona_to_worker.get(current_persona, "iron_worker"),
-            "selected_persona": current_persona,
-            "selected_creator": current_persona,
+            "next_node": next_worker,
+            "selected_persona": chosen_persona,
+            "selected_creator": chosen_persona,
         }
     
     # Build prompt from conversation
@@ -204,9 +231,12 @@ def supervisor_node(state: FitnessState) -> Dict:
         for msg in messages[-5:]  # Last 5 messages for context
     ])
     
+    subscribed_str = ", ".join(subscribed) if subscribed else "all"
     prompt = f"""You are the Supervisor and Safety Governor, the entry point for user interactions.
 
 Current Persona: {current_persona}
+Subscribed Personas (route ONLY to these workers): {subscribed_str}
+  - iron → iron_worker, yoga → yoga_worker, hiit → hiit_worker, kickboxing → kb_worker
 Current Fatigue Scores: {fatigue_scores}
 Fatigue Threshold: {fatigue_threshold} (if any score exceeds this, route to recovery_worker)
 Workouts Completed This Week: {workouts_completed}/{max_workouts}
@@ -214,16 +244,14 @@ Recent Conversation:
 {conversation}
 
 Analyze the conversation and decide:
-1. Should the persona change based on user's request?
-2. Are there any fatigue complaints to map (e.g., "my legs hurt" → [{{"muscle_group": "legs", "fatigue_value": 0.7}}])?
+1. Should the persona change based on user's request? (MUST pick from subscribed: {subscribed_str})
+2. Are there any fatigue complaints to map?
 3. Which worker should handle this request?
    - If user explicitly asks for rest/recovery, route to recovery_worker
    - If fatigue is high but below threshold, consider recovery_worker
-   - Otherwise route to appropriate specialist worker
+   - Otherwise route to ONE worker that best fits the message - MUST be from subscribed personas only
 
-SAFETY NOTE: If max fatigue > {fatigue_threshold}, you should route to recovery_worker (but this should already be handled by safety override).
-
-Return your routing decision."""
+Return your routing decision. selected_persona MUST be one of: {subscribed_str}."""
     
     # Get decision from supervisor agent
     import asyncio
@@ -237,15 +265,24 @@ Return your routing decision."""
     result = loop.run_until_complete(agent.run(prompt))
     decision: SupervisorDecision = result.data
     
+    # Enforce subscribed_personas: LLM must only pick from subscribed
+    chosen_persona = decision.selected_persona
+    next_worker = decision.next_node
+    if subscribed and chosen_persona not in subscribed:
+        # Override to first subscribed and map to worker
+        chosen_persona = subscribed[0]
+        next_worker = persona_to_worker.get(chosen_persona, "iron_worker")
+        if next_worker not in allowed_workers:
+            next_worker = next(iter(allowed_workers), "iron_worker")
+
     # Update fatigue scores with mapped complaints
-    # Convert List[FatigueUpdate] to Dict[str, float]
     updated_fatigue = {**fatigue_scores}
     for update in decision.fatigue_updates:
         updated_fatigue[update.muscle_group] = update.fatigue_value
-    
+
     return {
-        "next_node": decision.next_node,
-        "selected_persona": decision.selected_persona,
-        "selected_creator": decision.selected_persona,  # Legacy compatibility
+        "next_node": next_worker,
+        "selected_persona": chosen_persona,
+        "selected_creator": chosen_persona,
         "fatigue_scores": updated_fatigue,
     }

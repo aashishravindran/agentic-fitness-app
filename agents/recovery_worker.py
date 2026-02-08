@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from agents.trainer import get_llm_model
+from agents.workout_utils import inject_exercise_ids
 from state import FitnessState
 
 # Load .env file if it exists
@@ -132,8 +133,8 @@ Focus on activities that promote recovery, reduce cortisol, and prepare the user
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     recovery_plan = result.data
-    recovery_dict = recovery_plan.model_dump(mode="json")
-    
+    recovery_dict = inject_exercise_ids(recovery_plan.model_dump(mode="json"))
+
     # Update workout history - append this recovery session
     history = state.get("workout_history", [])
     history.append(recovery_dict)

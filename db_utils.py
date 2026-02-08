@@ -251,6 +251,179 @@ def update_max_workouts(
         return False
 
 
+def update_user_profile(
+    user_id: str,
+    profile_data: Dict[str, Any],
+    checkpoint_dir: str = "checkpoints",
+) -> bool:
+    """
+    Persist biometric data (height, weight, fitness_level) and onboarding status.
+
+    Args:
+        user_id: User ID (thread_id)
+        profile_data: Dict with keys height_cm, weight_kg, fitness_level, is_onboarded, recommended_persona
+        checkpoint_dir: Directory containing the checkpoint database
+
+    Returns:
+        True if updated, False if user not found
+    """
+    if not SQLITE_AVAILABLE:
+        return False
+
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return False
+
+    for key in ("height_cm", "weight_kg", "fitness_level", "is_onboarded", "recommended_persona", "recommended_personas", "recommendation_rationale", "subscribed_personas"):
+        if key in profile_data:
+            state[key] = profile_data[key]
+
+    return _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+
+
+def update_selected_persona(
+    user_id: str,
+    persona: str,
+    checkpoint_dir: str = "checkpoints",
+) -> bool:
+    """
+    Store the user's finalized persona choice.
+
+    Args:
+        user_id: User ID (thread_id)
+        persona: Persona key (iron, yoga, hiit, kickboxing) or creator key (coach_iron, etc.)
+        checkpoint_dir: Directory containing the checkpoint database
+
+    Returns:
+        True if updated, False if user not found
+    """
+    if not SQLITE_AVAILABLE:
+        return False
+
+    # Map creator keys to persona keys (and vice versa)
+    creator_to_persona_map = {
+        "coach_iron": "iron",
+        "zenflow_yoga": "yoga",
+        "inferno_hiit": "hiit",
+        "strikeforce_kb": "kickboxing",
+    }
+    persona_to_creator = {v: k for k, v in creator_to_persona_map.items()}
+
+    if persona in creator_to_persona_map:
+        persona_key = creator_to_persona_map[persona]
+        creator_key = persona
+    else:
+        persona_key = persona
+        creator_key = persona_to_creator.get(persona, persona)
+
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return False
+
+    state["selected_persona"] = persona_key
+    state["selected_creator"] = creator_key
+
+    return _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+
+
+def update_subscribed_personas(
+    user_id: str,
+    personas: List[str],
+    checkpoint_dir: str = "checkpoints",
+) -> bool:
+    """
+    Store the user's subscribed personas (can be multiple).
+    Also sets selected_persona to the first in the list.
+
+    Args:
+        user_id: User ID (thread_id)
+        personas: List of persona or creator keys (e.g. ["iron", "yoga"] or ["coach_iron", "zenflow_yoga"])
+        checkpoint_dir: Directory containing the checkpoint database
+
+    Returns:
+        True if updated, False if user not found
+    """
+    if not SQLITE_AVAILABLE:
+        return False
+
+    creator_to_persona_map = {
+        "coach_iron": "iron",
+        "zenflow_yoga": "yoga",
+        "inferno_hiit": "hiit",
+        "strikeforce_kb": "kickboxing",
+    }
+    persona_to_creator = {v: k for k, v in creator_to_persona_map.items()}
+
+    persona_keys: List[str] = []
+    creator_keys: List[str] = []
+    for p in personas:
+        if not p:
+            continue
+        if p in creator_to_persona_map:
+            persona_keys.append(creator_to_persona_map[p])
+            creator_keys.append(p)
+        else:
+            persona_keys.append(p)
+            creator_keys.append(persona_to_creator.get(p, p))
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_persona = []
+    unique_creator = []
+    for pk, ck in zip(persona_keys, creator_keys):
+        if pk not in seen:
+            seen.add(pk)
+            unique_persona.append(pk)
+            unique_creator.append(ck)
+
+    if not unique_persona:
+        return False
+
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return False
+
+    state["subscribed_personas"] = unique_persona
+    state["selected_persona"] = unique_persona[0]
+    state["selected_creator"] = unique_creator[0]
+
+    return _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+
+
+def _save_state_to_checkpoint(
+    user_id: str,
+    state: Dict[str, Any],
+    checkpoint_dir: str = "checkpoints",
+) -> bool:
+    """
+    Internal helper to write state back to SQLite checkpoint.
+
+    Returns:
+        True if saved, False if checkpoint not found
+    """
+    if not SQLITE_AVAILABLE:
+        return False
+
+    checkpointer = get_checkpointer(checkpoint_dir)
+    read_config = {"configurable": {"thread_id": user_id}}
+
+    try:
+        current_checkpoint = checkpointer.get(read_config)
+        if not current_checkpoint:
+            return False
+
+        checkpoint = dict(current_checkpoint)
+        checkpoint["channel_values"] = state
+        write_config = {"configurable": {"thread_id": user_id, "checkpoint_ns": ""}}
+        checkpointer.put(write_config, checkpoint, {}, {})
+        return True
+    except Exception as e:
+        print(f"Error saving state: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def update_fatigue_threshold(
     user_id: str,
     threshold: float,

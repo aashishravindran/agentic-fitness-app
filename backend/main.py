@@ -23,7 +23,7 @@ _BACKEND_DIR = Path(__file__).resolve().parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from routes import history, settings, status
+from routes import history, onboard, settings, status, workout
 from services.workout_service import WorkoutService
 
 # Configure logging
@@ -63,6 +63,8 @@ app.add_middleware(
 app.include_router(status.router, prefix="/api", tags=["status"])
 app.include_router(history.router, prefix="/api", tags=["history"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
+app.include_router(onboard.router, prefix="/api", tags=["onboard"])
+app.include_router(workout.router, prefix="/api", tags=["workout"])
 
 
 @app.websocket("/ws/workout/{user_id}")
@@ -152,12 +154,14 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                 # Handle set logging
                 set_data = data.get("data", {})
                 exercise_name = set_data.get("exercise")
+                exercise_id = set_data.get("exercise_id")
                 weight = set_data.get("weight", 0.0)
                 reps = set_data.get("reps", 0)
                 rpe = set_data.get("rpe", 5)
                 
                 result = await workout_service.log_set(
                     exercise_name=exercise_name,
+                    exercise_id=exercise_id,
                     weight=weight,
                     reps=reps,
                     rpe=rpe,

@@ -20,7 +20,12 @@ from pydantic_ai import Agent
 
 from agents.retriever import RetrieverConfig, retrieve_creator_rules
 from agents.trainer import get_llm_model
+from agents.workout_utils import inject_exercise_ids
+from feature_flags import ENABLE_EXTENSIBLE_PERSONAS
 from state import FitnessState
+
+STRICT_GROUNDING_SUFFIX = """
+STRICT COMPLIANCE: You must ONLY include exercises/poses/movements that are explicitly supported by the philosophy above. Do NOT hallucinate exercises outside this domain. If a movement is not in the philosophy, reject it and choose an alternative that fits."""
 
 
 # ============================================================================
@@ -153,7 +158,7 @@ Generate workouts that:
 - Use sets and reps (not duration)
 - Include tempo notes (e.g., "3-second eccentrics")
 - Reference Coach Iron's rules in justifications
-- Adapt when fatigue > 0.6 for target muscle groups"""
+- Adapt when fatigue > 0.6 for target muscle groups""" + (STRICT_GROUNDING_SUFFIX if ENABLE_EXTENSIBLE_PERSONAS else "")
 
 
 def iron_worker(state: FitnessState) -> Dict:
@@ -184,7 +189,7 @@ Generate a strength training workout focusing on push/pull/legs."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
-    workout_dict = workout.model_dump(mode="json")
+    workout_dict = inject_exercise_ids(workout.model_dump(mode="json"))
     # v1 logging: history/counter/fatigue applied in finalize_workout after log or finish
     return {
         "daily_workout": workout_dict,
@@ -208,7 +213,7 @@ Generate workouts that:
 - Use duration (not sets/reps)
 - Include modifications for different levels
 - Reference ZenFlow's philosophy in justifications
-- Adapt when fatigue > 0.6 for target areas"""
+- Adapt when fatigue > 0.6 for target areas""" + (STRICT_GROUNDING_SUFFIX if ENABLE_EXTENSIBLE_PERSONAS else "")
 
 
 def yoga_worker(state: FitnessState) -> Dict:
@@ -238,7 +243,7 @@ Generate a yoga practice focusing on spine/hips/shoulders."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
-    workout_dict = workout.model_dump(mode="json")
+    workout_dict = inject_exercise_ids(workout.model_dump(mode="json"))
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
@@ -261,7 +266,7 @@ Generate workouts that:
 - Use work/rest intervals
 - Specify intensity zones (Zone 2-5)
 - Reference Inferno HIIT's philosophy in justifications
-- Adapt when fatigue > 0.6 for cardio/cns"""
+- Adapt when fatigue > 0.6 for cardio/cns""" + (STRICT_GROUNDING_SUFFIX if ENABLE_EXTENSIBLE_PERSONAS else "")
 
 
 def hiit_worker(state: FitnessState) -> Dict:
@@ -291,7 +296,7 @@ Generate a HIIT workout focusing on cardio/cns systems."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
-    workout_dict = workout.model_dump(mode="json")
+    workout_dict = inject_exercise_ids(workout.model_dump(mode="json"))
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,
@@ -314,7 +319,7 @@ Generate workouts that:
 - Use round-based structure (work/rest)
 - Specify intensity levels (Technical/Moderate/High/Peak)
 - Reference Strikeforce's philosophy in justifications
-- Adapt when fatigue > 0.6 for target attributes"""
+- Adapt when fatigue > 0.6 for target attributes""" + (STRICT_GROUNDING_SUFFIX if ENABLE_EXTENSIBLE_PERSONAS else "")
 
 
 def kb_worker(state: FitnessState) -> Dict:
@@ -344,7 +349,7 @@ Generate a kickboxing workout focusing on coordination/speed/power/endurance."""
         asyncio.set_event_loop(loop)
     result = loop.run_until_complete(agent.run(prompt))
     workout = result.data
-    workout_dict = workout.model_dump(mode="json")
+    workout_dict = inject_exercise_ids(workout.model_dump(mode="json"))
     return {
         "daily_workout": workout_dict,
         "active_philosophy": philosophy,

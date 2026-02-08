@@ -161,6 +161,50 @@ You can modify `tests/test_trainer.py` to test different scenarios:
 }
 ```
 
+## Integration API Tests
+
+The `tests/test_integration_apis.py` suite tests all REST APIs with mocked LLM (no API keys needed):
+
+- **Status**: GET /users/{id}/status
+- **Profile**: GET /users/{id}/profile
+- **Onboard**: POST /users/{id}/onboard
+- **Select Persona**: POST /users/{id}/select-persona
+- **Workout**: POST /users/{id}/workout
+- **Log Set**: POST /users/{id}/log-set
+- **Finish Workout**: POST /users/{id}/finish-workout
+- **History**: GET /users/{id}/history
+- **Settings**: PATCH /users/{id}/settings
+- **Reset Fatigue**: POST /users/{id}/reset-fatigue
+- **Reset Workouts**: POST /users/{id}/reset-workouts
+- **New Week**: POST /users/{id}/new-week
+
+```bash
+pip install -r requirements.txt
+pytest tests/test_integration_apis.py -v
+```
+
+## E2E Workout Flow Tests
+
+The `tests/test_e2e_workout_flow.py` suite covers the full workout flow via the REST API:
+
+- **Exercise IDs**: Workout exercises have `id` (ex_0, ex_1, ...) for reliable log-set matching
+- **Interrupt after worker**: Graph pauses after worker, before finalize (user can log sets)
+- **Log-set**: By `exercise_id` (preferred) or by exercise name
+- **Finish-workout**: Resumes graph, runs finalize, clears daily_workout, saves to history
+
+```bash
+# Install deps, run ingest, configure LLM (Gemini/Ollama)
+pip install -r requirements.txt
+python main.py ingest
+
+# Run e2e tests
+python -m pytest tests/test_e2e_workout_flow.py -v
+# or
+python tests/test_e2e_workout_flow.py
+```
+
+Requires `ENABLE_PERSONA_RECOMMENDER=True` (default) for onboard flow.
+
 ## Next Steps
 
 Once the trainer works, you can:

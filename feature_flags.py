@@ -12,3 +12,10 @@ ENABLE_DECAY = False
 # When True, the history_analysis node runs (applies fatigue from previous workout).
 # When False, decay (or supervisor) connects directly to worker routing.
 ENABLE_HISTORY_ANALYZER = False
+
+# When True, strict persona grounding: workers reject movements outside their philosophy.
+# Uses dynamic creator discovery from creators/ directory instead of hardcoded routing.
+ENABLE_EXTENSIBLE_PERSONAS = True
+
+# When True, the persona recommender runs for non-onboarded users (one-time based on intake).
+ENABLE_PERSONA_RECOMMENDER = True

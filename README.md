@@ -275,9 +275,22 @@ Real-time connection for workout sessions.
 
 ### REST Endpoints
 
-- `GET /api/users/{user_id}/status` - Get weekly progress and fatigue scores
-- `GET /api/users/{user_id}/history` - Get workout history
-- `PATCH /api/users/{user_id}/settings` - Update user settings
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/users/{id}/onboard` | POST | Submit biometrics, trigger persona recommender |
+| `/api/users/{id}/select-persona` | POST | Subscribe to personas (body: `{"personas": ["iron","yoga"]}`) |
+| `/api/users/{id}/profile` | GET | Get biometric data and persona settings |
+| `/api/users/{id}/workout` | POST | Generate workout (body: `{"prompt": "I want a leg workout"}`) |
+| `/api/users/{id}/log-set` | POST | Log a set (body: `{"exercise":"Squat","weight":100,"reps":5,"rpe":8}`) |
+| `/api/users/{id}/finish-workout` | POST | Complete workout (applies fatigue, saves to history) |
+| `/api/users/{id}/reset-fatigue` | POST | Reset fatigue scores |
+| `/api/users/{id}/reset-workouts` | POST | Reset workouts_completed_this_week |
+| `/api/users/{id}/new-week` | POST | Simulate new week (triggers decay on next run) |
+| `/api/users/{id}/status` | GET | Weekly progress and fatigue |
+| `/api/users/{id}/history` | GET | Workout history |
+| `/api/users/{id}/settings` | PATCH | Update max_workouts_per_week, fatigue_threshold |
+
+**Workout flow**: Generate workout → graph interrupts with workout → optionally log sets → finish workout to apply fatigue and save. Same flow for REST and WebSocket. See [QUICKSTART_UI.md](./docs/QUICKSTART_UI.md) for curl examples.
 
 ## Database Management
 
