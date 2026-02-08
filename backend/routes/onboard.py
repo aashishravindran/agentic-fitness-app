@@ -36,6 +36,20 @@ class OnboardRequest(BaseModel):
     )
 
 
+class IntakeRequest(BaseModel):
+    """Request body for POST /users/{id}/intake (SuperSet narrative intake)."""
+    height_cm: float = Field(..., gt=0, lt=300, description="User height in cm")
+    weight_kg: float = Field(..., gt=0, lt=500, description="User weight in kg")
+    fitness_level: str = Field(
+        default="Intermediate",
+        description="Beginner, Intermediate, or Advanced",
+    )
+    about_me: str = Field(
+        default="",
+        description="Free-text narrative context (e.g., lifestyle, interests, limitations)",
+    )
+
+
 class SelectPersonasRequest(BaseModel):
     """Request body for POST /users/{id}/select-persona."""
     personas: List[str] = Field(
@@ -124,6 +138,7 @@ async def get_profile(user_id: str):
             "recommended_personas": [],
             "recommended_persona": None,
             "recommendation_rationale": None,
+            "about_me": None,
         }
 
     return {
@@ -137,4 +152,45 @@ async def get_profile(user_id: str):
         "recommended_personas": state.get("recommended_personas") or [],
         "recommended_persona": state.get("recommended_persona"),
         "recommendation_rationale": state.get("recommendation_rationale"),
+        "about_me": state.get("about_me"),
     }
+
+
+@router.post("/users/{user_id}/intake")
+async def complete_intake(user_id: str, body: IntakeRequest):
+    """
+    SuperSet narrative intake: persist height, weight, fitness_level, about_me,
+    run recommender with personal context, set is_onboarded=True.
+    """
+    if not ENABLE_PERSONA_RECOMMENDER:
+        raise HTTPException(
+            status_code=501,
+            detail="Persona recommender is disabled (ENABLE_PERSONA_RECOMMENDER=False)",
+        )
+    existing = get_user_state(user_id)
+    if existing and existing.get("is_onboarded"):
+        raise HTTPException(status_code=409, detail="User already onboarded.")
+
+    try:
+        from graph import run_intake
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_intake(
+                user_id=user_id,
+                height_cm=body.height_cm,
+                weight_kg=body.weight_kg,
+                fitness_level=body.fitness_level,
+                about_me=body.about_me or "",
+            ),
+        )
+        return {
+            "status": "ok",
+            "is_onboarded": True,
+            "recommended_personas": result.get("recommended_personas", []),
+            "subscribed_personas": result.get("subscribed_personas", []),
+            "rationale": result.get("recommendation_rationale", ""),
+        }
+    except Exception as e:
+        logger.exception("Intake failed for user %s: %s", user_id, e)
+        raise HTTPException(status_code=500, detail=str(e)) from e

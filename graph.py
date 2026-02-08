@@ -233,6 +233,7 @@ def run_onboard(
         "weight_kg": weight_kg,
         "goal": goal,
         "fitness_level": fitness_level,
+        "about_me": None,
         "is_onboarded": False,
         "recommended_personas": None,
         "recommended_persona": None,
@@ -282,6 +283,73 @@ def run_onboard(
             delete_user(user_id, checkpoint_dir)
             result = app.invoke(initial_state, config)
             return result
+        raise
+
+
+def run_intake(
+    user_id: str,
+    height_cm: float,
+    weight_kg: float,
+    fitness_level: str = "Intermediate",
+    about_me: str = "",
+    checkpoint_dir: str = "checkpoints",
+) -> dict:
+    """
+    SuperSet narrative intake: persist biometrics + about_me, run recommender, set is_onboarded.
+    """
+    import time
+    initial_state: FitnessState = {
+        "user_id": user_id,
+        "selected_persona": "iron",
+        "selected_creator": "coach_iron",
+        "next_node": "",
+        "height_cm": height_cm,
+        "weight_kg": weight_kg,
+        "goal": "Improve fitness",
+        "fitness_level": fitness_level,
+        "about_me": about_me,
+        "is_onboarded": False,
+        "recommended_personas": None,
+        "recommended_persona": None,
+        "subscribed_personas": None,
+        "fatigue_scores": {},
+        "last_session_timestamp": time.time(),
+        "workout_history": [],
+        "max_workouts_per_week": 4,
+        "workouts_completed_this_week": 0,
+        "fatigue_threshold": 0.8,
+        "messages": [],
+        "active_philosophy": None,
+        "retrieved_rules": [],
+        "retrieved_philosophy": "",
+        "current_workout": None,
+        "daily_workout": None,
+        "is_approved": False,
+        "active_logs": [],
+        "is_working_out": False,
+    }
+    app = build_onboard_graph(checkpoint_dir, enable_persistence=True)
+    config = {"configurable": {"thread_id": user_id}}
+    if SQLITE_AVAILABLE and SqliteSaver:
+        from db_utils import get_user_state
+        existing = get_user_state(user_id, checkpoint_dir)
+        if existing:
+            if existing.get("fatigue_scores"):
+                initial_state["fatigue_scores"] = existing["fatigue_scores"]
+            if existing.get("max_workouts_per_week"):
+                initial_state["max_workouts_per_week"] = existing["max_workouts_per_week"]
+            if existing.get("workouts_completed_this_week") is not None:
+                initial_state["workouts_completed_this_week"] = existing["workouts_completed_this_week"]
+            if existing.get("fatigue_threshold"):
+                initial_state["fatigue_threshold"] = existing["fatigue_threshold"]
+    try:
+        return app.invoke(initial_state, config)
+    except KeyError as e:
+        err = str(e).lower()
+        if "step" in err or "pending_sends" in err or "checkpoint" in err:
+            from db_utils import delete_user
+            delete_user(user_id, checkpoint_dir)
+            return app.invoke(initial_state, config)
         raise
 
 

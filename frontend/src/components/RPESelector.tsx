@@ -34,7 +34,7 @@ export default function RPESelector({ value, onChange }: RPESelectorProps) {
       />
 
       {/* Labels */}
-      <div className="flex justify-between mt-2 text-xs text-gray-600">
+      <div className="flex justify-between mt-2 text-xs text-gray-400">
         <span>1</span>
         <span>5</span>
         <span>10</span>
@@ -45,15 +45,15 @@ export default function RPESelector({ value, onChange }: RPESelectorProps) {
         <div className={`px-4 py-2 rounded-lg ${getColor(value)} text-white font-semibold text-lg`}>
           RPE {value}
         </div>
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-gray-400">
           {getLabel(value)}
         </div>
       </div>
 
       {/* Warning for high RPE */}
       {value >= 9 && (
-        <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-800 font-medium">
+        <div className="mt-3 p-3 bg-red-900/30 border border-red-500/50 rounded-lg">
+          <p className="text-sm text-red-300 font-medium">
             ⚠️ High RPE detected! This will significantly increase fatigue scores.
           </p>
         </div>

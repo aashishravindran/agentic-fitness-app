@@ -91,13 +91,15 @@ async def persona_recommendation_node_async(state: FitnessState) -> Dict:
     weight = state.get("weight_kg")
     goal = state.get("goal", "Improve fitness")
     fitness_level = state.get("fitness_level", "Intermediate")
+    about_me = state.get("about_me") or ""
 
     context = (
         f"User Metrics: Height {height}cm, Weight {weight}kg. "
         f"Goal: {goal}. Fitness Level: {fitness_level}. "
-        f"Available Personas: {', '.join(available_creators)}. "
-        f"Return 1 or 2 creator keys as a list."
     )
+    if about_me:
+        context += f"Personal context (use for hyper-personalized recommendation): {about_me}. "
+    context += f"Available Personas: {', '.join(available_creators)}. Return 1 or 2 creator keys as a list."
 
     agent = get_recommender_agent()
     result = await agent.run(context)

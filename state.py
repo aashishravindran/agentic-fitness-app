@@ -32,6 +32,7 @@ class FitnessState(TypedDict):
     height_cm: Optional[float]
     weight_kg: Optional[float]
     fitness_level: Optional[str]  # e.g., "Beginner", "Intermediate", "Advanced"
+    about_me: Optional[str]  # Narrative context (e.g., "I'm an SDE at AWS, I love hiking in Zion, sensitive knees")
     is_onboarded: bool  # If True, recommender is skipped during standard workflows
     recommended_personas: Optional[List[str]]  # Up to 2 AI-suggested personas (creator keys)
     recommended_persona: Optional[str]  # Legacy: first of recommended_personas
@@ -50,6 +51,8 @@ class FitnessState(TypedDict):
     
     # Context
     messages: List[Dict[str, str]]  # Conversation history
+    performance_tone: Optional[str]  # high_intensity | struggle | neutral (from history_analyzer)
+    tonality_hint: Optional[str]  # hype | protective | neutral (Max's voice mode)
     active_philosophy: Optional[str]  # Context pulled from RAG
     retrieved_rules: List[str]  # Context from RAG (chunks) - legacy
     retrieved_philosophy: str  # Combined philosophy text - legacy

@@ -274,7 +274,7 @@ def update_user_profile(
     if not state:
         return False
 
-    for key in ("height_cm", "weight_kg", "fitness_level", "is_onboarded", "recommended_persona", "recommended_personas", "recommendation_rationale", "subscribed_personas"):
+    for key in ("height_cm", "weight_kg", "fitness_level", "about_me", "is_onboarded", "recommended_persona", "recommended_personas", "recommendation_rationale", "subscribed_personas"):
         if key in profile_data:
             state[key] = profile_data[key]
 

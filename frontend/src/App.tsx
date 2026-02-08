@@ -2,20 +2,26 @@ import { useState, useEffect } from 'react'
 import StatusBanner from './components/StatusBanner'
 import WorkoutCard from './components/WorkoutCard'
 import LoginScreen from './components/LoginScreen'
+import IntakePage from './components/IntakePage'
 import NudgeBanner from './components/NudgeBanner'
+import Navbar from './components/Navbar'
+import MaxMascot from './components/MaxMascot'
+import GreetingBanner from './components/GreetingBanner'
 import { useWorkoutSocket } from './hooks/useWorkoutSocket'
 import { useWorkoutStore } from './store/workoutStore'
 
 function App() {
   const [userInput, setUserInput] = useState('')
-  const [persona, setPersona] = useState<'iron' | 'yoga' | 'hiit' | 'kickboxing'>('iron')
   const [userId, setUserId] = useState<string | null>(null)
+  const [showIntake, setShowIntake] = useState(false)
   const [userGoal, setUserGoal] = useState<string>('Build strength and improve fitness')
   const [maxWorkoutsPerWeek, setMaxWorkoutsPerWeek] = useState(4)
+  const [showQuestInput, setShowQuestInput] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [workoutHistory, setWorkoutHistory] = useState<Array<Record<string, unknown>>>([])
   const { connectionStatus, sendMessage } = useWorkoutSocket(userId || '')
-  const { state, workout, isWorkingOut, error, setError, clearState, setState } = useWorkoutStore()
+  const { state, workout, isWorkingOut, greetingMessage, error, setError, clearState, setState } = useWorkoutStore()
+  const [greetingComplete, setGreetingComplete] = useState(false)
 
   useEffect(() => {
     if (!showHistory || !userId) return
@@ -26,28 +32,45 @@ function App() {
       .catch(() => setWorkoutHistory([]))
   }, [showHistory, userId])
 
-  const handleLogin = (newUserId: string, goal: string) => {
+  const handleLogin = (newUserId: string, goToIntake: boolean) => {
     clearState()
+    setGreetingComplete(false)
     setUserId(newUserId)
-    setUserGoal(goal)
+    setShowIntake(goToIntake)
   }
+
+  const showActionButtons = greetingComplete || !greetingMessage
 
   // Show login screen if not logged in
   if (!userId) {
     return <LoginScreen onLogin={handleLogin} />
   }
 
-  const handleSendInput = () => {
-    if (!userInput.trim()) return
-    
+  // Show intake for new users
+  if (showIntake) {
+    return <IntakePage userId={userId} onComplete={() => setShowIntake(false)} />
+  }
+
+  const handleTrustMax = () => {
     sendMessage({
       type: 'USER_INPUT',
-      content: userInput,
-      persona: persona,
+      content: 'I want a workout.',
+      goal: userGoal,
+      max_workouts_per_week: maxWorkoutsPerWeek,
+    })
+  }
+
+  const handleSendInput = (content?: string) => {
+    const text = content ?? userInput.trim()
+    if (!text) return
+    sendMessage({
+      type: 'USER_INPUT',
+      content: text,
       goal: userGoal,
       max_workouts_per_week: maxWorkoutsPerWeek,
     })
     setUserInput('')
+    setShowQuestInput(false)
   }
 
   const handleLogSet = (exerciseName: string, exerciseId: string | null, weight: number, reps: number, rpe: number) => {
@@ -64,15 +87,29 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-blue-100">
+    <div className="min-h-screen bg-[#0D1117]">
+      {/* Navbar - SuperSet, Logged in as, Max icon */}
+      <Navbar
+        userId={userId}
+        onViewHistory={() => setShowHistory(true)}
+        onSwitchUser={() => {
+          clearState()
+          setUserInput('')
+          setUserGoal('Build strength and improve fitness')
+          setMaxWorkoutsPerWeek(4)
+          setShowHistory(false)
+          setShowQuestInput(false)
+          setUserId(null)
+        }}
+        connectionStatus={connectionStatus}
+      />
+
       <div className="container mx-auto px-4 py-6 max-w-4xl">
-        {/* Status Banner */}
+        {/* Status Banner - Max-centric, no View past workouts */}
         <StatusBanner
           workoutsCompleted={state?.workouts_completed_this_week || 0}
           maxWorkouts={state?.max_workouts_per_week ?? maxWorkoutsPerWeek}
-          persona={state?.selected_persona || 'iron'}
           fatigueScores={state?.fatigue_scores || {}}
-          userId={userId}
           onUpdateMaxWorkouts={async (newMax: number) => {
             const base = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${import.meta.env.VITE_WS_HOST || window.location.hostname}:${import.meta.env.VITE_WS_PORT || (window.location.protocol === 'https:' ? '443' : '8000')}`
             const res = await fetch(`${base}/api/users/${userId}/settings`, {
@@ -87,50 +124,28 @@ function App() {
             }
           }}
           onResetFatigue={() => {
-            if (window.confirm(`Reset all fatigue scores to zero for ${userId}? This will clear your current fatigue levels.`)) {
+            if (window.confirm(`Reset all fatigue scores to zero for ${userId}?`)) {
               sendMessage({ type: 'RESET_FATIGUE' })
             }
           }}
           onResetWorkouts={() => {
-            if (window.confirm(`Reset workouts completed counter to zero for ${userId}? This will reset your weekly progress.`)) {
+            if (window.confirm(`Reset workouts completed counter to zero for ${userId}?`)) {
               sendMessage({ type: 'RESET_WORKOUTS' })
             }
           }}
-          onViewHistory={() => setShowHistory(true)}
-          onStartFresh={state ? () => {
-            if (window.confirm('Start completely fresh? This will delete all your workout history and progress for this account.')) {
-              sendMessage({ type: 'RESET_USER' })
-            }
-          } : undefined}
         />
-
-        {/* Connection Status */}
-        <div className="mb-4 p-3 rounded-lg bg-white shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${
-              connectionStatus === 'connected' ? 'bg-green-500' :
-              connectionStatus === 'connecting' ? 'bg-yellow-500' :
-              'bg-red-500'
-            }`} />
-            <span className="text-sm text-gray-600">
-              {connectionStatus === 'connected' ? 'Connected' :
-               connectionStatus === 'connecting' ? 'Connecting...' :
-               'Disconnected'}
-            </span>
-          </div>
-        </div>
 
         {/* Error Display */}
         {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="mb-4 p-4 bg-red-900/30 border border-red-500/50 rounded-lg">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="font-semibold text-red-800 mb-1">Error</h3>
-                <p className="text-sm text-red-700">{error}</p>
+                <h3 className="font-semibold text-red-400 mb-1">Error</h3>
+                <p className="text-sm text-red-300">{error}</p>
               </div>
               <button
                 onClick={() => setError(null)}
-                className="text-red-600 hover:text-red-800"
+                className="text-red-400 hover:text-red-300"
               >
                 ×
               </button>
@@ -147,73 +162,74 @@ function App() {
           />
         )}
 
-        {/* User Info */}
-        <div className="mb-4 p-3 bg-white rounded-lg shadow-sm flex items-center justify-between">
-          <div>
-            <span className="text-sm text-gray-600">Logged in as: </span>
-            <span className="font-semibold text-gray-800">{userId}</span>
-          </div>
-          <button
-            onClick={() => {
-              // Clear state immediately when switching users
-              clearState()
-              // Reset all local state
-              setUserInput('')
-              setPersona('iron')
-              setUserGoal('Build strength and improve fitness')
-              setMaxWorkoutsPerWeek(4)
-              setShowHistory(false)
-              setUserId(null)
-            }}
-            className="text-sm text-blue-600 hover:text-blue-700"
-          >
-            Switch User
-          </button>
-        </div>
+        {/* Greeting from Max - stays visible; buttons appear below after delay */}
+        {greetingMessage && (
+          <GreetingBanner
+            message={greetingMessage}
+            onComplete={() => setGreetingComplete(true)}
+          />
+        )}
 
-        {/* User Input */}
-        <div className="mb-6 p-4 bg-white rounded-lg shadow-md">
-          <div className="flex gap-2 mb-2">
-            <select
-              value={persona}
-              onChange={(e) => setPersona(e.target.value as any)}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-            >
-              <option value="iron">Iron</option>
-              <option value="yoga">Yoga</option>
-              <option value="hiit">HIIT</option>
-              <option value="kickboxing">Kickboxing</option>
-            </select>
-            <input
-              type="text"
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendInput()}
-              placeholder="Type your request (e.g., 'Start leg day')"
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        {/* Dashboard: Trust Max & Choose my own path - shown after greeting */}
+        {showActionButtons && (
+        <div className="mb-6 p-4 bg-[#21262d] rounded-lg border border-[#00CFD1]/20">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
-              onClick={handleSendInput}
-              disabled={connectionStatus !== 'connected' || !userInput.trim()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              onClick={handleTrustMax}
+              disabled={connectionStatus !== 'connected'}
+              className="flex-1 px-6 py-3 bg-[#00CFD1] text-[#0D1117] font-semibold rounded-lg hover:bg-[#00e5e7] disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
             >
-              Send
+              (S) Trust Max
+            </button>
+            <button
+              onClick={() => setShowQuestInput(!showQuestInput)}
+              disabled={connectionStatus !== 'connected'}
+              className="flex-1 px-6 py-3 bg-transparent border-2 border-[#00CFD1] text-[#00CFD1] font-semibold rounded-lg hover:bg-[#00CFD1]/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Choose my own path
             </button>
           </div>
-          <div className="mt-2 pt-2 border-t border-gray-200">
+          {showQuestInput && (
+            <div className="mt-4 pt-4 border-t border-gray-600 space-y-2">
+              <div className="flex gap-2 items-start">
+                <MaxMascot size="sm" className="shrink-0 mt-1" />
+                <p className="text-sm text-gray-400">Be as specific as you like. I'll use your input to ground the session in the right creator philosophy.</p>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendInput()}
+                  placeholder="Tell me about your specific quest... (e.g., 'Focus on core stability for hiking' or 'High-intensity interval training for weight loss')"
+                  className="flex-1 px-4 py-3 bg-[#161B22] border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00CFD1]"
+                  autoFocus
+                />
+                <button
+                  onClick={() => handleSendInput()}
+                  disabled={connectionStatus !== 'connected' || !userInput.trim()}
+                  className="px-6 py-3 bg-[#00CFD1] text-[#0D1117] font-semibold rounded-lg hover:bg-[#00e5e7] disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  Start My Quest
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="mt-4 pt-4 border-t border-gray-600">
             <button
               onClick={() => {
                 if (window.confirm('Log a rest day? This will reduce your fatigue scores by 30% to simulate recovery.')) {
                   sendMessage({ type: 'LOG_REST' })
                 }
               }}
-              className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm text-gray-400 hover:text-[#00CFD1] hover:bg-[#00CFD1]/10 rounded-lg transition-colors"
               disabled={connectionStatus !== 'connected'}
             >
               🛌 Log Rest Day
             </button>
           </div>
         </div>
+        )}
 
         {/* Workout Card */}
         {workout && (
@@ -226,24 +242,24 @@ function App() {
         )}
 
         {/* Empty State */}
-        {!workout && connectionStatus === 'connected' && (
-          <div className="text-center py-12 text-gray-500">
+        {!workout && connectionStatus === 'connected' && showActionButtons && (
+          <div className="text-center py-12 text-gray-400">
             <p className="text-lg">No active workout</p>
-            <p className="text-sm mt-2">Send a message above to start a workout session</p>
+            <p className="text-sm mt-2">Trust Max or choose your own path above to start</p>
           </div>
         )}
 
-        {/* Past workouts modal */}
+        {/* Past workouts modal - hidden from main flow, accessible via navbar/settings if needed later */}
         {showHistory && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowHistory(false)}>
-            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-              <div className="p-4 border-b flex justify-between items-center">
-                <h2 className="text-lg font-semibold text-gray-800">Past workouts</h2>
-                <button type="button" onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowHistory(false)}>
+            <div className="bg-[#21262d] rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col border border-[#00CFD1]/20" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b border-gray-600 flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-[#00CFD1]">Past workouts</h2>
+                <button type="button" onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
               </div>
               <div className="p-4 overflow-y-auto flex-1">
                 {workoutHistory.length === 0 ? (
-                  <p className="text-gray-500 text-sm">No past workouts yet.</p>
+                  <p className="text-gray-400 text-sm">No past workouts yet.</p>
                 ) : (
                   <ul className="space-y-3">
                     {workoutHistory.map((w, i) => {
@@ -251,10 +267,10 @@ function App() {
                       const exercises = (w as Record<string, unknown>).exercises as Array<Record<string, unknown>> | undefined
                       const poses = (w as Record<string, unknown>).poses as Array<Record<string, unknown>> | undefined
                       return (
-                        <li key={i} className="border border-gray-200 rounded-lg p-3 text-left">
-                          <div className="font-medium text-gray-800">{title}</div>
+                        <li key={i} className="border border-gray-600 rounded-lg p-3 text-left">
+                          <div className="font-medium text-[#00CFD1]">{title}</div>
                           {Array.isArray(exercises) && exercises.length > 0 && (
-                            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+                            <ul className="mt-2 text-sm text-gray-300 space-y-1">
                               {exercises.map((ex, j) => {
                                 const name = (ex.exercise_name as string) || (ex.pose_name as string) || `Exercise ${j + 1}`
                                 const detail = ex.sets != null && ex.reps != null
@@ -269,28 +285,28 @@ function App() {
                                 return (
                                   <li key={j} className="flex justify-between gap-2">
                                     <span>{name}</span>
-                                    {detail && <span className="text-gray-500">{detail}</span>}
+                                    {detail && <span className="text-gray-400">{detail}</span>}
                                   </li>
                                 )
                               })}
                             </ul>
                           )}
                           {Array.isArray(poses) && poses.length > 0 && (
-                            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+                            <ul className="mt-2 text-sm text-gray-300 space-y-1">
                               {poses.map((po, j) => {
                                 const name = (po.pose_name as string) || `Pose ${j + 1}`
                                 const detail = po.duration != null ? String(po.duration) : ''
                                 return (
                                   <li key={j} className="flex justify-between gap-2">
                                     <span>{name}</span>
-                                    {detail && <span className="text-gray-500">{detail}</span>}
+                                    {detail && <span className="text-gray-400">{detail}</span>}
                                   </li>
                                 )
                               })}
                             </ul>
                           )}
                           {(!exercises?.length && !poses?.length) && (
-                            <p className="mt-1 text-sm text-gray-500">No exercises listed</p>
+                            <p className="mt-1 text-sm text-gray-400">No exercises listed</p>
                           )}
                         </li>
                       )

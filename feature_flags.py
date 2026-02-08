@@ -19,3 +19,10 @@ ENABLE_EXTENSIBLE_PERSONAS = True
 
 # When True, the persona recommender runs for non-onboarded users (one-time based on intake).
 ENABLE_PERSONA_RECOMMENDER = True
+
+# When True, Max shows a personalized greeting on dashboard load (using about_me + tonality).
+# When False, no greeting is generated; user goes straight to Trust Max / Choose my own path.
+ENABLE_GREETING = True
+
+# When True, greeting uses LLM for personalized message. When False, uses a simple template.
+ENABLE_GREETING_LLM = False

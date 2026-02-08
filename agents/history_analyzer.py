@@ -17,21 +17,17 @@ def history_analysis_node(state: FitnessState) -> Dict:
     Analyze the last workout in history and apply a fatigue 'pre-load'.
     
     This node runs after DecayNode to add fatigue based on the previous workout.
-    Logic:
-    - If the last workout targeted a muscle group, add fatigue (e.g., +0.3)
-    - Fatigue is capped at 1.0
-    - Different workout types map to different fatigue groups
     
     Args:
         state: FitnessState with workout_history and current fatigue_scores
     
     Returns:
-        Updated state with fatigue_scores adjusted based on history
+        Updated state with fatigue_scores
     """
     history = state.get("workout_history", [])
+    base_result: Dict = {"fatigue_scores": state.get("fatigue_scores", {})}
     if not history:
-        # No history, return current fatigue unchanged
-        return {"fatigue_scores": state.get("fatigue_scores", {})}
+        return base_result
 
     # Get the most recent workout
     last_workout = history[-1]
@@ -77,7 +73,7 @@ def history_analysis_node(state: FitnessState) -> Dict:
     if "endurance" in focus_attribute or "endurance" in focus:
         updated_fatigue["endurance"] = min(1.0, updated_fatigue.get("endurance", 0.0) + 0.3)
         updated_fatigue["cardio"] = min(1.0, updated_fatigue.get("cardio", 0.0) + 0.2)
-    
+
     # Check exercises for additional fatigue signals
     exercises = last_workout.get("exercises", [])
     for exercise in exercises:

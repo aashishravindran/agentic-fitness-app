@@ -39,33 +39,33 @@ export default function WorkoutCard({
   const focus = workout?.focus_area || workout?.focus_system || workout?.focus_attribute || 'General'
 
   return (
-    <div className="mb-6 p-6 bg-white rounded-lg shadow-md">
+    <div className="mb-6 p-6 bg-[#21262d] rounded-lg border border-[#00CFD1]/20">
       <div className="mb-4">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Today's Workout</h2>
-        <p className="text-sm text-gray-600">Focus: <span className="font-semibold">{focus}</span></p>
+        <h2 className="text-2xl font-bold text-[#00CFD1] mb-2">Today's Workout</h2>
+        <p className="text-sm text-gray-400">Focus: <span className="font-semibold text-gray-300">{focus}</span></p>
         {workout?.overall_rationale && (
-          <p className="text-sm text-gray-600 mt-2">{workout.overall_rationale}</p>
+          <p className="text-sm text-gray-400 mt-2">{workout.overall_rationale}</p>
         )}
       </div>
 
       {/* Exercises */}
       {exercises.length > 0 && (
         <div className="mb-6">
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Exercises</h3>
+          <h3 className="text-lg font-semibold text-gray-300 mb-3">Exercises</h3>
           <div className="space-y-4">
             {exercises.map((exercise: any, index: number) => (
               <div
                 key={index}
                 className={`p-4 border-2 rounded-lg ${
                   selectedExercise === exercise.exercise_name
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200'
+                    ? 'border-[#00CFD1] bg-[#00CFD1]/10'
+                    : 'border-gray-600'
                 }`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <h4 className="font-semibold text-gray-800">{exercise.exercise_name}</h4>
-                    <p className="text-sm text-gray-600">
+                    <h4 className="font-semibold text-gray-100">{exercise.exercise_name}</h4>
+                    <p className="text-sm text-gray-400">
                       Sets: {exercise.sets} | Reps: {exercise.reps}
                     </p>
                     {exercise.tempo_notes && (
@@ -78,7 +78,7 @@ export default function WorkoutCard({
                         setSelectedExercise(exercise.exercise_name)
                         setSelectedExerciseId(exercise.id ?? null)
                       }}
-                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                      className="px-3 py-1 text-sm bg-[#00CFD1] text-[#0D1117] rounded hover:bg-[#00e5e7]"
                     >
                       Log Set
                     </button>
@@ -87,7 +87,7 @@ export default function WorkoutCard({
 
                 {/* Log Set Form */}
                 {selectedExercise === exercise.exercise_name && isWorkingOut && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="mt-4 p-4 bg-[#161B22] rounded-lg">
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -98,7 +98,7 @@ export default function WorkoutCard({
                           value={weight}
                           onChange={(e) => setWeight(e.target.value)}
                           placeholder="0"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2 bg-[#0D1117] border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#00CFD1]"
                         />
                       </div>
                       <div>
@@ -110,7 +110,7 @@ export default function WorkoutCard({
                           value={reps}
                           onChange={(e) => setReps(e.target.value)}
                           placeholder="0"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full px-3 py-2 bg-[#0D1117] border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#00CFD1]"
                         />
                       </div>
                     </div>
@@ -124,7 +124,7 @@ export default function WorkoutCard({
 
                     <button
                       onClick={handleLogSet}
-                      className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                      className="w-full px-4 py-2 bg-[#00CFD1] text-[#0D1117] rounded-md hover:bg-[#00e5e7]"
                     >
                       Log Set
                     </button>
@@ -139,13 +139,13 @@ export default function WorkoutCard({
       {/* Yoga Poses */}
       {poses.length > 0 && (
         <div className="mb-6">
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Poses</h3>
+          <h3 className="text-lg font-semibold text-gray-300 mb-3">Poses</h3>
           <div className="space-y-3">
             {poses.map((pose: any, index: number) => (
-              <div key={index} className="p-4 border border-gray-200 rounded-lg">
-                <h4 className="font-semibold text-gray-800">{pose.pose_name}</h4>
+              <div key={index} className="p-4 border border-gray-600 rounded-lg">
+                <h4 className="font-semibold text-gray-200">{pose.pose_name}</h4>
                 {pose.duration && (
-                  <p className="text-sm text-gray-600">Duration: {pose.duration}</p>
+                  <p className="text-sm text-gray-400">Duration: {pose.duration}</p>
                 )}
                 {pose.focus_area && (
                   <p className="text-xs text-gray-500 mt-1">Focus: {pose.focus_area}</p>
@@ -158,10 +158,10 @@ export default function WorkoutCard({
 
       {/* Finish Workout Button */}
       {isWorkingOut && (
-        <div className="mt-6 pt-6 border-t border-gray-200">
+        <div className="mt-6 pt-6 border-t border-gray-600">
           <button
             onClick={onFinishWorkout}
-            className="w-full px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
+            className="w-full px-6 py-3 bg-[#00CFD1] text-[#0D1117] rounded-lg font-semibold hover:bg-[#00e5e7] transition-colors"
           >
             Finish Workout
           </button>

@@ -9,7 +9,7 @@ type MessageType =
   | 'FINISH_WORKOUT'
 
 type ClientMessage = 
-  | { type: 'USER_INPUT'; content: string; persona?: string; goal?: string; max_workouts_per_week?: number }
+  | { type: 'USER_INPUT'; content: string; goal?: string; max_workouts_per_week?: number }
   | { type: 'LOG_SET'; data: { exercise: string; weight: number; reps: number; rpe: number } }
   | { type: 'APPROVE_SUGGESTION'; approved: boolean }
   | { type: 'RESUME' }
@@ -20,7 +20,7 @@ type ClientMessage =
   | { type: 'LOG_REST' }
 
 type ServerMessage = 
-  | { type: 'AGENT_RESPONSE'; state: any; workout: any; is_working_out?: boolean; workout_completed?: boolean; user_reset?: boolean }
+  | { type: 'AGENT_RESPONSE'; state: any; workout: any; is_working_out?: boolean; workout_completed?: boolean; user_reset?: boolean; greeting_message?: string | null }
   | { type: 'ERROR'; message: string }
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected'
@@ -29,7 +29,7 @@ export function useWorkoutSocket(userId: string) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const { setState, setWorkout, setIsWorkingOut, setError, clearState } = useWorkoutStore()
+  const { setState, setWorkout, setIsWorkingOut, setGreetingMessage, setError, clearState } = useWorkoutStore()
 
   const connect = () => {
     // Don't connect if no userId
@@ -94,6 +94,10 @@ export function useWorkoutSocket(userId: string) {
               setState(null)
               setWorkout(null)
               setIsWorkingOut(false)
+              setGreetingMessage(null)
+            }
+            if (message.greeting_message !== undefined) {
+              setGreetingMessage(message.greeting_message || null)
             }
           } else if (message.type === 'ERROR') {
             console.error('WebSocket error:', message.message)

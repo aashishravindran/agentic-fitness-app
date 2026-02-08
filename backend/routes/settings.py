@@ -21,6 +21,7 @@ class SettingsUpdate(BaseModel):
     """Settings update payload."""
     max_workouts_per_week: int | None = None
     fatigue_threshold: float | None = None
+    about_me: str | None = None
 
 
 @router.patch("/users/{user_id}/settings")
@@ -41,6 +42,8 @@ async def update_user_settings(user_id: str, settings: SettingsUpdate):
         updates = {}
         if settings.max_workouts_per_week is not None:
             updates["max_workouts_per_week"] = settings.max_workouts_per_week
+        if settings.about_me is not None:
+            updates["about_me"] = settings.about_me
         if settings.fatigue_threshold is not None:
             if not 0.0 <= settings.fatigue_threshold <= 1.0:
                 raise HTTPException(

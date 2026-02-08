@@ -1,77 +1,70 @@
 import { useState } from 'react'
 
 interface LoginScreenProps {
-  onLogin: (userId: string, goal: string) => void
+  onLogin: (userId: string, goToIntake: boolean) => void
 }
 
 export default function LoginScreen({ onLogin }: LoginScreenProps) {
-  const [userId, setUserId] = useState('')
-  const [goal, setGoal] = useState('Build strength and improve fitness')
+  const [username, setUsername] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (userId.trim()) {
-      onLogin(userId.trim(), goal.trim() || 'Build strength and improve fitness')
+    const trimmed = username.trim()
+    if (!trimmed) return
+    setLoading(true)
+    setError(null)
+    try {
+      const base = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${import.meta.env.VITE_WS_HOST || window.location.hostname}:${import.meta.env.VITE_WS_PORT || (window.location.protocol === 'https:' ? '443' : '8000')}`
+      const res = await fetch(`${base}/api/users/${encodeURIComponent(trimmed)}/profile`)
+      const data = await res.json()
+      const isOnboarded = data?.is_onboarded === true
+      onLogin(trimmed, !isOnboarded)
+    } catch (err) {
+      setError('Could not reach server. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-blue-100 flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
+    <div className="min-h-screen bg-[#0D1117] flex items-center justify-center px-4">
+      <div className="max-w-md w-full bg-[#21262d] rounded-xl p-8 shadow-xl border border-[#00CFD1]/20">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">Agentic Fitness</h1>
-          <p className="text-gray-600">Your AI-powered workout coach</p>
+          <h1 className="text-3xl font-bold text-[#00CFD1] mb-2">SuperSet</h1>
+          <p className="text-gray-400">Your AI-powered training stack</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="userId" className="block text-sm font-medium text-gray-700 mb-2">
-              User ID
+            <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-2">
+              Username
             </label>
             <input
-              id="userId"
+              id="username"
               type="text"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="Enter your user ID (e.g., john_doe)"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter your username"
+              className="w-full px-4 py-2 bg-[#161B22] border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#00CFD1] focus:border-transparent"
               required
+              disabled={loading}
             />
-            <p className="mt-1 text-xs text-gray-500">
-              This ID will be used to track your progress and workout history
-            </p>
           </div>
 
-          <div>
-            <label htmlFor="goal" className="block text-sm font-medium text-gray-700 mb-2">
-              Fitness Goal
-            </label>
-            <textarea
-              id="goal"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="Build strength and improve fitness"
-              rows={3}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Describe your fitness goals (optional)
-            </p>
-          </div>
+          {error && (
+            <p className="text-sm text-red-400">{error}</p>
+          )}
 
           <button
             type="submit"
-            className="w-full px-6 py-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+            disabled={loading}
+            className="w-full px-6 py-3 bg-[#00CFD1] text-[#0D1117] font-semibold rounded-lg hover:bg-[#00e5e7] focus:outline-none focus:ring-2 focus:ring-[#00CFD1] focus:ring-offset-2 focus:ring-offset-[#0D1117] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Start Workout Session
+            {loading ? 'Checking...' : 'Continue'}
           </button>
         </form>
-
-        <div className="mt-6 pt-6 border-t border-gray-200">
-          <p className="text-xs text-gray-500 text-center">
-            Your workout history and progress will be saved automatically
-          </p>
-        </div>
       </div>
     </div>
   )

@@ -17,26 +17,26 @@ export default function NudgeBanner({ message, onApprove, onIgnore }: NudgeBanne
   }
 
   return (
-    <div className="mb-6 p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg shadow-md">
+    <div className="mb-6 p-4 bg-[#21262d] border-2 border-[#00CFD1]/50 rounded-lg">
       <div className="flex items-start gap-3">
         <div className="flex-shrink-0">
-          <div className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center">
-            <span className="text-yellow-900 font-bold">!</span>
+          <div className="w-8 h-8 bg-[#00CFD1] rounded-full flex items-center justify-center">
+            <span className="text-[#0D1117] font-bold">!</span>
           </div>
         </div>
         <div className="flex-1">
-          <h3 className="font-semibold text-yellow-900 mb-1">Coach Suggestion</h3>
-          <p className="text-sm text-yellow-800 mb-3">{message}</p>
+          <h3 className="font-semibold text-[#00CFD1] mb-1">Max Suggestion</h3>
+          <p className="text-sm text-gray-300 mb-3">{message}</p>
           <div className="flex gap-2">
             <button
               onClick={onApprove}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
+              className="px-4 py-2 bg-[#00CFD1] text-[#0D1117] rounded-md hover:bg-[#00e5e7] text-sm font-medium"
             >
               Accept
             </button>
             <button
               onClick={onIgnore}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm font-medium"
+              className="px-4 py-2 bg-gray-600 text-gray-300 rounded-md hover:bg-gray-500 text-sm font-medium"
             >
               Ignore
             </button>

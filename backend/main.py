@@ -18,13 +18,18 @@ from fastapi.middleware.cors import CORSMiddleware
 import sys
 from pathlib import Path
 
-# Add backend directory to path for imports
+# Add project root and backend directory to path for imports
 _BACKEND_DIR = Path(__file__).resolve().parent
-if str(_BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(_BACKEND_DIR))
+_PROJECT_ROOT = _BACKEND_DIR.parent
+for p in (_PROJECT_ROOT, _BACKEND_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
 from routes import history, onboard, settings, status, workout
 from services.workout_service import WorkoutService
+
+# Import feature flags (need project root in path)
+import feature_flags  # noqa: E402
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -89,21 +94,36 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
         # Check if client wants to start fresh (via query param or initial message)
         # For now, we'll handle it via a RESET_USER message
         
-        # Send initial state if available (but only if it exists and has meaningful data)
+        # Send initial state on connect.
+        # Only send workout when there's an active session (is_working_out).
+        # Avoid showing completed/previous workouts as "Today's workout" without Finish button.
         initial_state = await workout_service.get_current_state()
-        if initial_state and (initial_state.get("daily_workout") or initial_state.get("workout_history")):
-            await websocket.send_json({
-                "type": "AGENT_RESPONSE",
-                "state": initial_state,
-                "workout": initial_state.get("daily_workout"),
-            })
-        else:
-            # Send empty state to ensure frontend knows there's no data
-            await websocket.send_json({
-                "type": "AGENT_RESPONSE",
-                "state": None,
-                "workout": None,
-            })
+        is_working_out = bool(initial_state and initial_state.get("is_working_out", False))
+        daily_workout = initial_state.get("daily_workout") if initial_state else None
+        workout_to_send = daily_workout if (is_working_out and daily_workout) else None
+        state_to_send = initial_state
+
+        # Generate personalized greeting from Max (about_me + tonality from last workout)
+        # Controlled by ENABLE_GREETING feature flag.
+        greeting_message = None
+        if feature_flags.ENABLE_GREETING:
+            try:
+                from agents.greeting import generate_greeting_for_dashboard
+                about_me = (initial_state or {}).get("about_me") or ""
+                workout_history = (initial_state or {}).get("workout_history") or []
+                greeting_message = await generate_greeting_for_dashboard(
+                    user_id, about_me, workout_history
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate greeting for {user_id}: {e}")
+
+        await websocket.send_json({
+            "type": "AGENT_RESPONSE",
+            "state": state_to_send,
+            "workout": workout_to_send,
+            "is_working_out": is_working_out,
+            "greeting_message": greeting_message,
+        })
         
         while True:
             # Receive message from client
@@ -115,11 +135,16 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
             if message_type == "USER_INPUT":
                 # Handle natural language input or command
                 content = data.get("content", "")
-                persona = data.get("persona", "iron")  # Default persona
                 goal = data.get("goal", "Build strength and improve fitness")
                 max_workouts_per_week = data.get("max_workouts_per_week")  # Optional; used for new users
 
                 try:
+                    # Use profile's subscribed_personas (personas are subscribed once via onboard/select-persona)
+                    from db_utils import get_user_state
+                    profile = get_user_state(user_id)
+                    subscribed = (profile or {}).get("subscribed_personas") or []
+                    persona = subscribed[0] if subscribed else (profile or {}).get("selected_persona", "iron")
+
                     # Run the workout graph
                     logger.info(f"Processing user input for {user_id}: {content[:50]}...")
                     result = await workout_service.process_user_input(
@@ -127,6 +152,7 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                         persona=persona,
                         goal=goal,
                         max_workouts_per_week=max_workouts_per_week,
+                        subscribed_personas=subscribed or None,
                     )
                     
                     logger.info(f"Workout generated for {user_id}. Daily workout: {result.get('daily_workout') is not None}")

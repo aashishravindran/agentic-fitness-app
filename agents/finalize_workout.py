@@ -121,11 +121,14 @@ def finalize_workout_node(state: FitnessState) -> Dict:
             "active_logs": [],
             "is_working_out": False,
         }
+    active_logs = state.get("active_logs") or []
     history = list(state.get("workout_history", []))
-    history.append(daily_workout)
+    entry = dict(daily_workout)
+    if active_logs:
+        entry["_active_logs"] = active_logs  # Store for performance-aware tone
+    history.append(entry)
     workouts_completed = state.get("workouts_completed_this_week", 0) + 1
     fatigue_scores = state.get("fatigue_scores", {})
-    active_logs = state.get("active_logs") or []
 
     if active_logs:
         fatigue_scores = compute_fatigue_from_logs(fatigue_scores, active_logs)
