@@ -1,12 +1,24 @@
-creator_db/
+# Environment / secrets
 .env
-.env.local
-.env.*.local
-__pycache__/
-*.pyc
-.pytest_cache/
-.DS_Store
-checkpoints/
-*.db
-.venv/
+*.env
 
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Generated / runtime data
+checkpoints/
+creator_db/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -27,6 +27,7 @@ from db_utils import (
     delete_user,
     export_user_state,
     simulate_new_week,
+    migrate_subscribed_personas_all,
 )
 from ingest import ingest
 from state import ExerciseLog, FitnessState, SetLog
@@ -501,7 +502,7 @@ def _interactive_chat_loop(
             if low in ("quit", "exit", "q"):
                 print("Bye.")
                 return
-            # --- natural language: run workout
+            # --- natural language: run workout or Q&A
             messages = [{"role": "user", "content": line}]
             result = run_workout(
                 user_id=user_id,
@@ -511,18 +512,23 @@ def _interactive_chat_loop(
                 messages=messages,
                 checkpoint_dir=checkpoint_dir,
             )
+            # Q&A response (question routed to qa_worker)
+            chat_response = result.get("chat_response")
+            if chat_response:
+                print(f"\nMax: {chat_response}\n")
+                continue
             workout = result.get("daily_workout")
             workouts_completed = result.get("workouts_completed_this_week", 0)
             max_workouts = result.get("max_workouts_per_week", 4)
             if not workout:
                 if workouts_completed >= max_workouts and max_workouts > 0:
-                    print("\n🎯 Workout goal achieved for the week! Prioritize rest.\n")
+                    print("\nWorkout goal achieved for the week! Prioritize rest.\n")
                 else:
                     print("No workout generated.")
                 continue
             _print_workout(workout, json_out=False)
             if result.get("is_working_out"):
-                print("\n📋 Session paused. Use start_workout to view, log_exercise <name> <RPE> to log, finish_workout when done.")
+                print("\nSession paused. Use start_workout to view, log_exercise <name> <RPE> to log, finish_workout when done.")
         except EOFError:
             print("\nBye.")
             return
@@ -648,6 +654,64 @@ def cmd_finish_workout(args: argparse.Namespace) -> None:
         traceback.print_exc()
 
 
+def cmd_ask(args: argparse.Namespace) -> None:
+    """One-shot Q&A: ask Max a question about your workouts, goals, or fatigue."""
+    from agents.qa_agent import run_qa_standalone
+    from db_utils import get_user_state
+
+    user_state = get_user_state(args.user_id) or {}
+    question = args.question
+    print(f"\nYou: {question}\n")
+    try:
+        answer = run_qa_standalone(user_state, question)
+        print(f"Max: {answer}\n")
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def cmd_onboard(args: argparse.Namespace) -> None:
+    """Run persona recommender for a user and print the recommendation."""
+    from graph import run_intake
+
+    user_id = args.user_id
+    print("=" * 70)
+    print("Onboarding — Persona Recommender")
+    print("=" * 70)
+    print(f"User:          {user_id}")
+    print(f"Height:        {args.height} cm")
+    print(f"Weight:        {args.weight} kg")
+    print(f"Fitness level: {args.fitness_level}")
+    if args.about_me:
+        print(f"About me:      {args.about_me}")
+    print("\nRunning recommender...\n")
+
+    try:
+        result = run_intake(
+            user_id=user_id,
+            height_cm=float(args.height),
+            weight_kg=float(args.weight),
+            fitness_level=args.fitness_level,
+            about_me=args.about_me or "",
+        )
+        personas = result.get("recommended_personas") or []
+        rationale = result.get("recommendation_rationale") or ""
+        subscribed = result.get("subscribed_personas") or []
+        print("=" * 70)
+        print("RECOMMENDATION")
+        print("=" * 70)
+        print(f"Recommended personas:  {', '.join(personas) if personas else '(none)'}")
+        print(f"Subscribed to:         {', '.join(subscribed) if subscribed else '(none)'}")
+        if rationale:
+            print(f"\nRationale:\n  {rationale}")
+        print()
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def cmd_reset_workout(args: argparse.Namespace) -> None:
     """Clear the current in-progress workout for this user so you can start a new one. Keeps history, fatigue, and settings."""
     user_id = getattr(args, "user_id", "cli_user")
@@ -745,6 +809,19 @@ def cmd_db(args: argparse.Namespace) -> None:
         else:
             print(f"❌ User '{args.user_id}' not found")
 
+    elif args.db_cmd == "migrate-subscriptions":
+        print("Running subscribed_personas migration for all users...")
+        results = migrate_subscribed_personas_all()
+        migrated = [u for u, r in results.items() if r.startswith("migrated")]
+        already = [u for u, r in results.items() if r == "already_set"]
+        errors  = {u: r for u, r in results.items() if r.startswith("error")}
+        print(f"\nMigrated ({len(migrated)}):  {', '.join(migrated) if migrated else 'none'}")
+        print(f"Already set ({len(already)}): {', '.join(already) if already else 'none'}")
+        if errors:
+            print(f"Errors ({len(errors)}):")
+            for u, e in errors.items():
+                print(f"  {u}: {e}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fitness RAG + Supervisor CLI.")
@@ -841,6 +918,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_reset.add_argument("--user-id", default="cli_user", help="User ID (thread)")
     p_reset.set_defaults(func=cmd_reset_workout)
 
+    p_ask = sub.add_parser("ask", help="One-shot Q&A: ask Max about your workouts, goals, or fatigue")
+    p_ask.add_argument("question", help="Your question, e.g. \"How many workouts do I have left this week?\"")
+    p_ask.add_argument("--user-id", default="cli_user", help="User ID (loads your state for context)")
+    p_ask.set_defaults(func=cmd_ask)
+
+    p_onboard = sub.add_parser("onboard", help="Run persona recommender for a new (or existing) user")
+    p_onboard.add_argument("--user-id", default="test_user", help="User ID (creates or resets their profile)")
+    p_onboard.add_argument("--height", type=float, required=True, help="Height in cm (e.g. 175)")
+    p_onboard.add_argument("--weight", type=float, required=True, help="Weight in kg (e.g. 75)")
+    p_onboard.add_argument(
+        "--fitness-level",
+        default="Intermediate",
+        choices=["Beginner", "Intermediate", "Advanced"],
+        help="Self-reported fitness level",
+    )
+    p_onboard.add_argument("--about-me", default="", help="Free-text personal context for hyper-personalised recommendation")
+    p_onboard.set_defaults(func=cmd_onboard)
+
     # Database management commands
     p_db = sub.add_parser("db", help="Database management utilities")
     db_sub = p_db.add_subparsers(dest="db_cmd", required=True)
@@ -878,7 +973,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_db_export = db_sub.add_parser("export", help="Export user state to JSON")
     p_db_export.add_argument("user_id", help="User ID")
     p_db_export.add_argument("output", help="Output JSON file path")
-    
+
+    db_sub.add_parser(
+        "migrate-subscriptions",
+        help="One-time migration: populate subscribed_personas from selected_persona for all users",
+    )
+
     p_db.set_defaults(func=cmd_db)
 
     return parser

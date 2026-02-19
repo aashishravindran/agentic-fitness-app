@@ -67,4 +67,7 @@ class FitnessState(TypedDict):
     active_logs: Optional[List[Dict]]  # List of ExerciseLog as dicts (set after log-exercise)
     is_working_out: Optional[bool]  # True when paused after worker, waiting for log/finish
 
+    # Chat / Q&A
+    chat_response: Optional[str]  # Answer from qa_worker; None during normal workout flow
+
 

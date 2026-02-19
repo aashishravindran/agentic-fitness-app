@@ -31,6 +31,7 @@ from agents.decay import decay_node
 from agents.finalize_workout import finalize_workout_node
 from agents.history_analyzer import history_analysis_node
 from agents.log_rest import log_rest_node
+from agents.qa_agent import qa_worker_node
 from agents.recovery_worker import recovery_worker
 from agents.recommender import persona_recommendation_node
 from agents.supervisor import supervisor_node
@@ -73,11 +74,18 @@ def _check_onboarding(state: FitnessState) -> Literal["recommender", "supervisor
     return "recommender"
 
 
-def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"]:
+def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "qa_worker", "end"]:
     """
     Route after Decay + History Analysis. Re-apply safety overrides using current state,
     since History Analysis may have pushed fatigue over threshold (supervisor saw stale fatigue).
+    Q&A requests bypass safety overrides and go straight to qa_worker.
     """
+    next_node = state.get("next_node", "end")
+
+    # Q&A requests skip safety overrides — no workout is being generated
+    if next_node == "qa_worker":
+        return "qa_worker"
+
     # Safety override 1: weekly limit (use current state after decay/history)
     workouts_completed = state.get("workouts_completed_this_week", 0)
     max_workouts = state.get("max_workouts_per_week", 4)
@@ -92,7 +100,6 @@ def route_after_supervisor(state: FitnessState) -> Literal["iron_worker", "yoga_
         return "recovery_worker"
 
     # Use supervisor's decision otherwise
-    next_node = state.get("next_node", "end")
     return next_node
 
 
@@ -124,6 +131,7 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_node("hiit_worker", hiit_worker)
     workflow.add_node("kb_worker", kb_worker)
     workflow.add_node("recovery_worker", recovery_worker)
+    workflow.add_node("qa_worker", qa_worker_node)
     workflow.add_node("finalize_workout", finalize_workout_node)
 
     # Conditional entry: recommender for non-onboarded users, else supervisor
@@ -162,6 +170,7 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
             "hiit_worker": "hiit_worker",
             "kb_worker": "kb_worker",
             "recovery_worker": "recovery_worker",
+            "qa_worker": "qa_worker",
             "end": END,
         },
     )
@@ -173,6 +182,8 @@ def build_graph(checkpoint_dir: str = "checkpoints", enable_persistence: bool = 
     workflow.add_edge("kb_worker", "finalize_workout")
     workflow.add_edge("finalize_workout", END)
     workflow.add_edge("recovery_worker", END)
+    # Q&A answers the question and ends — no workout finalize step
+    workflow.add_edge("qa_worker", END)
 
     # Compile with breakpoint after training workers (user can log sets before finalize)
     if enable_persistence and SQLITE_AVAILABLE and SqliteSaver:
@@ -455,7 +466,11 @@ def run_workout(
                 if "recommended_personas" in existing_state:
                     initial_state["recommended_personas"] = existing_state["recommended_personas"]
                 if "subscribed_personas" in existing_state:
-                    initial_state["subscribed_personas"] = existing_state["subscribed_personas"]
+                    loaded_subs = existing_state["subscribed_personas"]
+                    # Guarantee subscribed_personas is always a non-empty list
+                    if not loaded_subs:
+                        loaded_subs = [persona]  # Fall back to the requested persona
+                    initial_state["subscribed_personas"] = loaded_subs
                 if "height_cm" in existing_state:
                     initial_state["height_cm"] = existing_state.get("height_cm")
                 if "weight_kg" in existing_state:
@@ -478,30 +493,18 @@ def run_workout(
             try:
                 from db_utils import delete_user
                 delete_user(user_id, checkpoint_dir)
-                # Retry with fresh initial_state (no merge) so we don't pass stale high fatigue
-                fresh_state: FitnessState = {
-                    "user_id": user_id,
-                    "selected_persona": persona,
-                    "selected_creator": persona,
-                    "next_node": "",
-                    "is_onboarded": True,
-                    "fatigue_scores": fatigue_scores,
-                    "last_session_timestamp": time.time(),
-                    "workout_history": [],
-                    "max_workouts_per_week": 4,
-                    "workouts_completed_this_week": 0,
-                    "fatigue_threshold": 0.8,
-                    "messages": messages or [],
-                    "active_philosophy": None,
-                    "retrieved_rules": [],
-                    "retrieved_philosophy": "",
-                    "goal": goal,
-                    "current_workout": None,
-                    "daily_workout": None,
-                    "is_approved": False,
-                    "active_logs": [],
-                    "is_working_out": False,
-                }
+                # Reuse initial_state (which has subscribed_personas, goal, about_me, etc.
+                # already merged from the persisted state) but reset workout-in-progress
+                # fields and force the caller-supplied fatigue_scores so we never carry
+                # stale high fatigue through to the retry.
+                fresh_state = dict(initial_state)
+                fresh_state["fatigue_scores"] = fatigue_scores  # caller-supplied, not stale
+                fresh_state["daily_workout"] = None
+                fresh_state["current_workout"] = None
+                fresh_state["is_working_out"] = False
+                fresh_state["active_logs"] = []
+                fresh_state["next_node"] = ""
+                fresh_state["messages"] = messages or []
                 result = app.invoke(fresh_state, config)
             except Exception as retry_error:
                 raise Exception(f"Failed to recover from corrupted checkpoint: {retry_error}") from e

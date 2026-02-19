@@ -566,6 +566,53 @@ def simulate_new_week(user_id: str, checkpoint_dir: str = "checkpoints") -> bool
         return False
 
 
+def migrate_subscribed_personas_all(
+    checkpoint_dir: str = "checkpoints",
+    default_persona: str = "iron",
+) -> Dict[str, str]:
+    """
+    One-time migration: for every user whose subscribed_personas is null/empty,
+    set it from selected_persona (falling back to default_persona).
+    Also ensures selected_persona always mirrors subscribed_personas[0].
+
+    Returns a summary dict: {user_id: "migrated" | "already_set" | "error"}.
+    """
+    users = list_users(checkpoint_dir)
+    results: Dict[str, str] = {}
+    for user_id in users:
+        try:
+            state = get_user_state(user_id, checkpoint_dir)
+            if not state:
+                results[user_id] = "no_state"
+                continue
+
+            existing = state.get("subscribed_personas")
+            if existing:
+                # Already has subscriptions — ensure selected_persona matches [0]
+                first = existing[0]
+                if state.get("selected_persona") != first:
+                    state["selected_persona"] = first
+                    state["selected_creator"] = first
+                    _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+                results[user_id] = "already_set"
+                continue
+
+            # Pull from selected_persona or fall back to default
+            persona = state.get("selected_persona") or default_persona
+            # Validate it's a known persona key
+            valid = {"iron", "yoga", "hiit", "kickboxing"}
+            if persona not in valid:
+                persona = default_persona
+
+            state["subscribed_personas"] = [persona]
+            state["selected_persona"] = persona
+            _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+            results[user_id] = f"migrated→{persona}"
+        except Exception as e:
+            results[user_id] = f"error:{e}"
+    return results
+
+
 def delete_user(user_id: str, checkpoint_dir: str = "checkpoints") -> bool:
     """
     Delete all data for a user.

@@ -40,14 +40,16 @@ async def get_user_status(user_id: str):
                 "fatigue_scores": {},
                 "fatigue_threshold": 0.8,
                 "selected_persona": "iron",
+                "subscribed_personas": [],
             }
-        
+
         return {
             "workouts_completed_this_week": state.get("workouts_completed_this_week", 0),
             "max_workouts_per_week": state.get("max_workouts_per_week", 4),
             "fatigue_scores": state.get("fatigue_scores", {}),
             "fatigue_threshold": state.get("fatigue_threshold", 0.8),
             "selected_persona": state.get("selected_persona", "iron"),
+            "subscribed_personas": state.get("subscribed_personas") or [],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

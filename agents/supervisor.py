@@ -30,6 +30,40 @@ PERSONA_SWITCH_KEYWORDS = (
     "recovery", "rest day", "stretch", "boxing", "weights", "run",
     "interval", "meditation", "flow",
 )
+# Question starters that indicate a conversational Q&A request (not a workout request)
+_QA_STARTERS = (
+    "how", "what", "why", "when", "who", "where", "which", "tell me",
+    "explain", "can you", "could you", "should i", "is it", "are there",
+    "do i", "does", "did", "will i", "would", "advice", "help me understand",
+)
+
+
+def is_question(user_message: str) -> bool:
+    """
+    Return True when the message looks like a conversational question rather
+    than a workout request.  A trailing '?' is the strongest signal; common
+    question-word openings are a secondary heuristic.  Explicit workout /
+    complaint keywords override so "how many squats?" still starts a workout.
+    """
+    if not user_message or not user_message.strip():
+        return False
+    text = user_message.lower().strip()
+
+    # Explicit workout or complaint language takes priority — treat as workout
+    if any(kw in text for kw in COMPLAINT_KEYWORDS):
+        return False
+    if any(kw in text for kw in PERSONA_SWITCH_KEYWORDS):
+        return False
+
+    # A trailing '?' is a strong question signal
+    if text.endswith("?"):
+        return True
+
+    # Starts with a recognised question word
+    if any(text.startswith(kw) for kw in _QA_STARTERS):
+        return True
+
+    return False
 
 
 def needs_llm_reasoning(user_message: str) -> bool:
@@ -58,9 +92,13 @@ class FatigueUpdate(BaseModel):
 
 class SupervisorDecision(BaseModel):
     """Supervisor's routing decision."""
-    
-    next_node: Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "end"] = Field(
-        description="Which worker node to route to, 'recovery_worker' for rest/recovery, or 'end' to finish"
+
+    next_node: Literal["iron_worker", "yoga_worker", "hiit_worker", "kb_worker", "recovery_worker", "qa_worker", "end"] = Field(
+        description=(
+            "Which worker node to route to. Use 'qa_worker' when the user asks a question "
+            "rather than requesting a workout. Use 'recovery_worker' for rest/recovery. "
+            "Use 'end' to finish."
+        )
     )
     selected_persona: Literal["iron", "yoga", "hiit", "kickboxing"] = Field(
         description="The persona/user's training style preference"
@@ -95,6 +133,8 @@ Your role:
    - "hiit" → hiit_worker (cardio: cardio/cns)
    - "kickboxing" → kb_worker (coordination: coordination/speed)
    - "recovery_worker" → For rest days, active recovery, or when fatigue is too high (always allowed)
+   - "qa_worker" → When the user asks a question about their progress, goals, fatigue, or training
+     philosophy rather than requesting a workout (e.g. "how many workouts left?", "why is my fatigue high?")
    - When user has multiple subscribed personas, pick the worker that best fits the user's message.
 
 **Fatigue Mapping Between Personas:**
@@ -211,12 +251,23 @@ def supervisor_node(state: FitnessState) -> Dict:
             "selected_creator": chosen_persona,
         }
 
-    # Short-circuit: if last user message has no complaints or persona-switch, route directly
+    # Short-circuit: inspect last user message before calling LLM
     last_user_message = ""
     for msg in reversed(messages):
         if msg.get("role") == "user":
             last_user_message = msg.get("content", "") or ""
             break
+
+    # Q&A short-circuit: questions go straight to qa_worker (no LLM routing call needed)
+    if is_question(last_user_message):
+        return {
+            "next_node": "qa_worker",
+            "selected_persona": current_persona,
+            "selected_creator": current_persona,
+            "chat_response": None,  # will be populated by qa_worker_node
+        }
+
+    # Workout short-circuit: no complaints or persona-switch → route directly to current worker
     if not needs_llm_reasoning(last_user_message):
         next_worker, chosen_persona = _pick_from_subscribed()
         return {

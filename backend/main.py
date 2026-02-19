@@ -157,12 +157,14 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                     
                     logger.info(f"Workout generated for {user_id}. Daily workout: {result.get('daily_workout') is not None}")
                     
-                    # Send response back
+                    # Send response back.
+                    # chat_response is set when supervisor routed to qa_worker.
                     await websocket.send_json({
                         "type": "AGENT_RESPONSE",
                         "state": result,
                         "workout": result.get("daily_workout"),
                         "is_working_out": result.get("is_working_out", False),
+                        "chat_response": result.get("chat_response"),
                     })
                     
                     # If graph is interrupted (waiting for user action), wait for resume
@@ -279,14 +281,46 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                 # Log a rest day and reduce fatigue scores
                 logger.info(f"Logging rest day for {user_id}")
                 result = await workout_service.log_rest_day()
-                
+
                 await websocket.send_json({
                     "type": "AGENT_RESPONSE",
                     "state": result,
                     "workout": result.get("daily_workout"),
                     "rest_logged": True,
                 })
-                
+
+            elif message_type == "CHAT_MESSAGE":
+                # Conversational Q&A: answers questions without generating a workout.
+                # This is a lightweight path that does NOT touch the workout graph or
+                # checkpoint state, so it never interferes with an active session.
+                question = data.get("content", "").strip()
+                if not question:
+                    await websocket.send_json({
+                        "type": "ERROR",
+                        "message": "CHAT_MESSAGE requires a non-empty 'content' field.",
+                    })
+                    continue
+
+                try:
+                    from db_utils import get_user_state
+                    from agents.qa_agent import run_qa_standalone
+
+                    user_state = get_user_state(user_id) or {}
+                    loop = asyncio.get_event_loop()
+                    answer = await loop.run_in_executor(
+                        None, lambda: run_qa_standalone(user_state, question)
+                    )
+                    await websocket.send_json({
+                        "type": "CHAT_RESPONSE",
+                        "answer": answer,
+                    })
+                except Exception as e:
+                    logger.error(f"CHAT_MESSAGE error for {user_id}: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "type": "ERROR",
+                        "message": f"Failed to answer question: {str(e)}",
+                    })
+
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 await websocket.send_json({
