@@ -39,6 +39,10 @@ class FitnessState(TypedDict):
     recommendation_rationale: Optional[str]  # Brief explanation for the recommendation
     subscribed_personas: Optional[List[str]]  # Personas user has subscribed to (can be multiple)
 
+    # Equipment & Duration
+    equipment: Optional[List[str]]  # e.g. ["dumbbells", "pull-up bar", "resistance bands"]
+    workout_duration_minutes: Optional[int]  # e.g. 30, 45, 60
+
     # Persistent State
     fatigue_scores: Dict[str, float]  # e.g., {"legs": 0.8, "push": 0.1, "spine": 0.3}
     last_session_timestamp: float  # Unix timestamp of last session
@@ -66,6 +70,9 @@ class FitnessState(TypedDict):
     # Live workout logging (v1)
     active_logs: Optional[List[Dict]]  # List of ExerciseLog as dicts (set after log-exercise)
     is_working_out: Optional[bool]  # True when paused after worker, waiting for log/finish
+
+    # Recommendation review
+    recommendation_pending: Optional[bool]  # True after recommender runs, cleared on accept
 
     # Chat / Q&A
     chat_response: Optional[str]  # Answer from qa_worker; None during normal workout flow

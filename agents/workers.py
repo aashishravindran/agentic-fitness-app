@@ -142,6 +142,25 @@ def retrieve_worker_philosophy(creator_name: str, k: int = 8) -> str:
     return "\n\n".join(rules)
 
 
+def _build_constraints(state: FitnessState) -> str:
+    """Build equipment and duration constraint text to inject into worker prompts."""
+    parts = []
+    equipment = state.get("equipment")
+    if equipment:
+        parts.append(
+            f"Available Equipment: {', '.join(equipment)}. "
+            "ONLY use exercises that are possible with this equipment. "
+            "Do NOT include exercises requiring equipment the user does not have."
+        )
+    duration = state.get("workout_duration_minutes")
+    if duration:
+        parts.append(
+            f"Time Limit: {duration} minutes. "
+            "The entire workout (including warm-up and cool-down) MUST fit within this duration."
+        )
+    return "\n".join(parts)
+
+
 # v1: Fatigue is applied in finalize_workout (RPE-based or default) after log/finish.
 
 # ============================================================================
@@ -172,15 +191,17 @@ def iron_worker(state: FitnessState) -> Dict:
     high_fatigue = [k for k, v in fatigue_scores.items() if v > 0.6]
     warning = f"\n⚠️ High fatigue (>0.6): {', '.join(high_fatigue)}" if high_fatigue else ""
     
+    constraints = _build_constraints(state)
     prompt = f"""Fatigue Scores: {fatigue_str}{warning}
 Goal: {goal}
+{constraints}
 Coach Iron's Philosophy:
 {philosophy}
 
 Generate a strength training workout focusing on push/pull/legs."""
-    
+
     import asyncio
-    
+
     agent = get_worker_agent(StrengthWorkoutPlan, IRON_PROMPT)
     try:
         loop = asyncio.get_event_loop()
@@ -226,15 +247,17 @@ def yoga_worker(state: FitnessState) -> Dict:
     high_fatigue = [k for k, v in fatigue_scores.items() if v > 0.6]
     warning = f"\n⚠️ High fatigue (>0.6): {', '.join(high_fatigue)}" if high_fatigue else ""
     
+    constraints = _build_constraints(state)
     prompt = f"""Fatigue Scores: {fatigue_str}{warning}
 Goal: {goal}
+{constraints}
 ZenFlow Yoga Philosophy:
 {philosophy}
 
 Generate a yoga practice focusing on spine/hips/shoulders."""
-    
+
     import asyncio
-    
+
     agent = get_worker_agent(YogaWorkoutPlan, YOGA_PROMPT)
     try:
         loop = asyncio.get_event_loop()
@@ -279,15 +302,17 @@ def hiit_worker(state: FitnessState) -> Dict:
     high_fatigue = [k for k, v in fatigue_scores.items() if v > 0.6]
     warning = f"\n⚠️ High fatigue (>0.6): {', '.join(high_fatigue)}" if high_fatigue else ""
     
+    constraints = _build_constraints(state)
     prompt = f"""Fatigue Scores: {fatigue_str}{warning}
 Goal: {goal}
+{constraints}
 Inferno HIIT Philosophy:
 {philosophy}
 
 Generate a HIIT workout focusing on cardio/cns systems."""
-    
+
     import asyncio
-    
+
     agent = get_worker_agent(HIITWorkoutPlan, HIIT_PROMPT)
     try:
         loop = asyncio.get_event_loop()
@@ -332,15 +357,17 @@ def kb_worker(state: FitnessState) -> Dict:
     high_fatigue = [k for k, v in fatigue_scores.items() if v > 0.6]
     warning = f"\n⚠️ High fatigue (>0.6): {', '.join(high_fatigue)}" if high_fatigue else ""
     
+    constraints = _build_constraints(state)
     prompt = f"""Fatigue Scores: {fatigue_str}{warning}
 Goal: {goal}
+{constraints}
 Strikeforce Kickboxing Philosophy:
 {philosophy}
 
 Generate a kickboxing workout focusing on coordination/speed/power/endurance."""
-    
+
     import asyncio
-    
+
     agent = get_worker_agent(KickboxingWorkoutPlan, KB_PROMPT)
     try:
         loop = asyncio.get_event_loop()

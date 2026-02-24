@@ -37,6 +37,30 @@ _QA_STARTERS = (
     "do i", "does", "did", "will i", "would", "advice", "help me understand",
 )
 
+# Command phrases that should route to the QA agent (command hub) instead of workout workers
+_COMMAND_KEYWORDS = (
+    "reset my fatigue", "clear fatigue", "reset fatigue",
+    "reset workouts", "reset my workouts", "start fresh",
+    "increase workouts", "decrease workouts", "set workouts",
+    "i want to work out", "i want to workout",
+    "i only have", "i just got", "i bought",
+    "make it", "make workouts", "change duration", "set duration",
+    "set threshold", "change threshold",
+    "update my equipment", "update equipment", "change equipment",
+    "minutes today", "minutes per",
+)
+
+
+def is_command(user_message: str) -> bool:
+    """
+    Return True when the message looks like a settings/state command
+    that should be handled by the QA agent (command hub).
+    """
+    if not user_message or not user_message.strip():
+        return False
+    text = user_message.lower().strip()
+    return any(kw in text for kw in _COMMAND_KEYWORDS)
+
 
 def is_question(user_message: str) -> bool:
     """
@@ -228,23 +252,32 @@ def supervisor_node(state: FitnessState) -> Dict:
     else:
         allowed_workers = {"iron_worker", "yoga_worker", "hiit_worker", "kb_worker"}
 
-    def _pick_from_subscribed() -> tuple:
-        """Pick worker from subscribed; use current_persona if in subscribed, else first subscribed."""
-        if current_persona in subscribed:
-            w = persona_to_worker.get(current_persona, "iron_worker")
-            if w in allowed_workers:
-                return w, current_persona
-        for p in subscribed:
-            w = persona_to_worker.get(p)
-            if w and w in allowed_workers:
-                return w, p
-        # Fallback
+    # Keyword heuristics for context-aware persona selection
+    _PERSONA_HINTS = {
+        "iron": ("strength", "lift", "weights", "barbell", "deadlift", "squat", "bench", "muscle"),
+        "yoga": ("stretch", "flexibility", "mobility", "yoga", "flow", "meditation", "breathe"),
+        "hiit": ("cardio", "burn", "intervals", "hiit", "metabolic", "sweat", "fat"),
+        "kickboxing": ("boxing", "kick", "punch", "combat", "martial", "strike", "fight"),
+    }
+
+    def _pick_from_subscribed(user_msg: str = "") -> tuple:
+        """Pick worker from subscribed based on message context, not just current_persona."""
+        text = user_msg.lower().strip()
+        # Try to match message keywords to a subscribed persona
+        if text and len(subscribed) > 1:
+            for p in subscribed:
+                hints = _PERSONA_HINTS.get(p, ())
+                if any(h in text for h in hints):
+                    w = persona_to_worker.get(p, "iron_worker")
+                    if w in allowed_workers:
+                        return w, p
+        # No keyword match — fall back to first subscribed
         p = subscribed[0] if subscribed else current_persona
         return persona_to_worker.get(p, "iron_worker"), p
 
     # If no messages, use default routing from subscribed personas
     if not messages:
-        next_worker, chosen_persona = _pick_from_subscribed()
+        next_worker, chosen_persona = _pick_from_subscribed("")
         return {
             "next_node": next_worker,
             "selected_persona": chosen_persona,
@@ -258,6 +291,15 @@ def supervisor_node(state: FitnessState) -> Dict:
             last_user_message = msg.get("content", "") or ""
             break
 
+    # Command short-circuit: settings/state commands go to qa_worker (command hub)
+    if is_command(last_user_message):
+        return {
+            "next_node": "qa_worker",
+            "selected_persona": current_persona,
+            "selected_creator": current_persona,
+            "chat_response": None,
+        }
+
     # Q&A short-circuit: questions go straight to qa_worker (no LLM routing call needed)
     if is_question(last_user_message):
         return {
@@ -267,9 +309,9 @@ def supervisor_node(state: FitnessState) -> Dict:
             "chat_response": None,  # will be populated by qa_worker_node
         }
 
-    # Workout short-circuit: no complaints or persona-switch → route directly to current worker
+    # Workout short-circuit: no complaints or persona-switch → route directly based on message context
     if not needs_llm_reasoning(last_user_message):
-        next_worker, chosen_persona = _pick_from_subscribed()
+        next_worker, chosen_persona = _pick_from_subscribed(last_user_message)
         return {
             "next_node": next_worker,
             "selected_persona": chosen_persona,

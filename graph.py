@@ -33,7 +33,7 @@ from agents.history_analyzer import history_analysis_node
 from agents.log_rest import log_rest_node
 from agents.qa_agent import qa_worker_node
 from agents.recovery_worker import recovery_worker
-from agents.recommender import persona_recommendation_node
+from agents.recommender import persona_recommendation_node, refine_recommendation
 from agents.supervisor import supervisor_node
 from agents.workers import hiit_worker, iron_worker, kb_worker, yoga_worker
 from feature_flags import ENABLE_DECAY, ENABLE_HISTORY_ANALYZER, ENABLE_PERSONA_RECOMMENDER
@@ -264,6 +264,9 @@ def run_onboard(
         "is_approved": False,
         "active_logs": [],
         "is_working_out": False,
+        "recommendation_pending": None,
+        "equipment": None,
+        "workout_duration_minutes": None,
     }
 
     app = build_onboard_graph(checkpoint_dir, enable_persistence=True)
@@ -282,6 +285,10 @@ def run_onboard(
                 initial_state["workouts_completed_this_week"] = existing["workouts_completed_this_week"]
             if existing.get("fatigue_threshold"):
                 initial_state["fatigue_threshold"] = existing["fatigue_threshold"]
+            if existing.get("equipment"):
+                initial_state["equipment"] = existing["equipment"]
+            if existing.get("workout_duration_minutes"):
+                initial_state["workout_duration_minutes"] = existing["workout_duration_minutes"]
 
     try:
         result = app.invoke(initial_state, config)
@@ -338,6 +345,9 @@ def run_intake(
         "is_approved": False,
         "active_logs": [],
         "is_working_out": False,
+        "recommendation_pending": None,
+        "equipment": None,
+        "workout_duration_minutes": None,
     }
     app = build_onboard_graph(checkpoint_dir, enable_persistence=True)
     config = {"configurable": {"thread_id": user_id}}
@@ -353,6 +363,10 @@ def run_intake(
                 initial_state["workouts_completed_this_week"] = existing["workouts_completed_this_week"]
             if existing.get("fatigue_threshold"):
                 initial_state["fatigue_threshold"] = existing["fatigue_threshold"]
+            if existing.get("equipment"):
+                initial_state["equipment"] = existing["equipment"]
+            if existing.get("workout_duration_minutes"):
+                initial_state["workout_duration_minutes"] = existing["workout_duration_minutes"]
     try:
         return app.invoke(initial_state, config)
     except KeyError as e:
@@ -362,6 +376,44 @@ def run_intake(
             delete_user(user_id, checkpoint_dir)
             return app.invoke(initial_state, config)
         raise
+
+
+def run_refine_recommendation(
+    user_id: str,
+    feedback: str,
+    checkpoint_dir: str = "checkpoints",
+) -> dict:
+    """
+    Re-run the recommender with user feedback on the previous suggestion.
+
+    Loads the user's existing state (which has the previous recommendation),
+    calls the refine logic, and persists the updated recommendation.
+    Does NOT set is_onboarded=True — that only happens on accept.
+    """
+    from db_utils import get_user_state
+
+    existing = get_user_state(user_id, checkpoint_dir)
+    if not existing:
+        raise ValueError(f"User {user_id} not found. Complete onboarding first.")
+
+    result = refine_recommendation(existing, feedback)
+
+    # Persist the updated recommendation back to the checkpoint
+    if SQLITE_AVAILABLE and SqliteSaver:
+        from db_utils import update_recommendation
+
+        update_recommendation(
+            user_id,
+            recommended_personas=result["recommended_personas"],
+            recommendation_rationale=result["recommendation_rationale"],
+            subscribed_personas=result["subscribed_personas"],
+            selected_persona=result["selected_persona"],
+            selected_creator=result["selected_creator"],
+            checkpoint_dir=checkpoint_dir,
+            workout_duration_minutes=result.get("workout_duration_minutes"),
+        )
+
+    return result
 
 
 def run_workout(
@@ -414,6 +466,9 @@ def run_workout(
         "is_approved": False,
         "active_logs": [],
         "is_working_out": False,
+        "recommendation_pending": None,
+        "equipment": None,
+        "workout_duration_minutes": None,
     }
     if subscribed_personas is not None:
         initial_state["subscribed_personas"] = subscribed_personas
@@ -477,6 +532,12 @@ def run_workout(
                     initial_state["weight_kg"] = existing_state.get("weight_kg")
                 if "fitness_level" in existing_state:
                     initial_state["fitness_level"] = existing_state.get("fitness_level")
+                if "about_me" in existing_state:
+                    initial_state["about_me"] = existing_state.get("about_me")
+                if existing_state.get("equipment"):
+                    initial_state["equipment"] = existing_state["equipment"]
+                if existing_state.get("workout_duration_minutes"):
+                    initial_state["workout_duration_minutes"] = existing_state["workout_duration_minutes"]
     except Exception:
         # If loading fails, continue with provided initial_state
         pass

@@ -10,6 +10,8 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services.workout_service import WorkoutService
@@ -22,6 +24,8 @@ class SettingsUpdate(BaseModel):
     max_workouts_per_week: int | None = None
     fatigue_threshold: float | None = None
     about_me: str | None = None
+    equipment: Optional[List[str]] = None
+    workout_duration_minutes: int | None = None
 
 
 @router.patch("/users/{user_id}/settings")
@@ -51,6 +55,10 @@ async def update_user_settings(user_id: str, settings: SettingsUpdate):
                     detail="fatigue_threshold must be between 0.0 and 1.0"
                 )
             updates["fatigue_threshold"] = settings.fatigue_threshold
+        if settings.equipment is not None:
+            updates["equipment"] = settings.equipment
+        if settings.workout_duration_minutes is not None:
+            updates["workout_duration_minutes"] = settings.workout_duration_minutes
         
         if not updates:
             # No updates provided, return current state
