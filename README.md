@@ -107,7 +107,7 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 An AWS CLI-style tool that calls the REST API. Requires the backend to be running.
 
 ```bash
-# Make it executable (one-time)
+# Make it executable
 chmod +x superset
 
 # See all available endpoints
@@ -150,10 +150,32 @@ chmod +x superset
 
 **Direct graph/DB access for testing and development (no backend needed):**
 
-- **Ingest creator data**: `python main.py ingest`
-- **Query RAG**: `python main.py query --creator coach_iron --query "How should I adjust training?"`
-- **Chat**: `python main.py chat "I want a strength workout"`
-- **View users**: `python main.py db list` / `python main.py db view <user_id>`
+#### RAG System (Ingest + Query)
+
+- **Ingest creator data**:
+  ```bash
+  python main.py ingest
+  ```
+
+- **Query RAG** (filtered by creator):
+  ```bash
+  python main.py query --creator coach_iron --query "How should I adjust training when fatigue is high?"
+  ```
+
+#### Interactive Chat CLI
+
+- **Chat with the agent** (natural language):
+  ```bash
+  python main.py chat "I want a strength workout, my legs are a bit sore"
+  python main.py chat "Give me a yoga flow, my hips are tight"
+  python main.py chat "HIIT session please" --persona hiit
+  ```
+
+- **View user state**:
+  ```bash
+  python main.py db view <user_id>
+  python main.py db list
+  ```
 
 See **[QUICKSTART.md](./docs/QUICKSTART.md)** for detailed CLI instructions.
 

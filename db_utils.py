@@ -274,7 +274,7 @@ def update_user_profile(
     if not state:
         return False
 
-    for key in ("height_cm", "weight_kg", "fitness_level", "about_me", "is_onboarded", "recommended_persona", "recommended_personas", "recommendation_rationale", "subscribed_personas"):
+    for key in ("height_cm", "weight_kg", "fitness_level", "about_me", "is_onboarded", "recommended_persona", "recommended_personas", "recommendation_rationale", "subscribed_personas", "equipment", "workout_duration_minutes"):
         if key in profile_data:
             state[key] = profile_data[key]
 
@@ -611,6 +611,82 @@ def migrate_subscribed_personas_all(
         except Exception as e:
             results[user_id] = f"error:{e}"
     return results
+
+
+def update_recommendation(
+    user_id: str,
+    recommended_personas: List[str],
+    recommendation_rationale: str,
+    subscribed_personas: List[str],
+    selected_persona: str,
+    selected_creator: str,
+    checkpoint_dir: str = "checkpoints",
+    workout_duration_minutes: Optional[int] = None,
+) -> bool:
+    """
+    Persist an updated recommendation (from refine loop) without marking the user as onboarded.
+
+    Args:
+        user_id: User ID (thread_id)
+        recommended_personas: Updated creator keys (e.g. ["coach_iron", "inferno_hiit"])
+        recommendation_rationale: Updated rationale text
+        subscribed_personas: Updated persona keys (e.g. ["iron", "hiit"])
+        selected_persona: Primary persona key
+        selected_creator: Primary creator key
+        checkpoint_dir: Directory containing the checkpoint database
+        workout_duration_minutes: Recommended workout duration in minutes
+
+    Returns:
+        True if updated, False if user not found
+    """
+    if not SQLITE_AVAILABLE:
+        return False
+
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return False
+
+    state["recommended_personas"] = recommended_personas
+    state["recommended_persona"] = recommended_personas[0] if recommended_personas else None
+    state["recommendation_rationale"] = recommendation_rationale
+    state["subscribed_personas"] = subscribed_personas
+    state["selected_persona"] = selected_persona
+    state["selected_creator"] = selected_creator
+    state["recommendation_pending"] = True
+    if workout_duration_minutes is not None:
+        state["workout_duration_minutes"] = workout_duration_minutes
+
+    return _save_state_to_checkpoint(user_id, state, checkpoint_dir)
+
+
+def accept_recommendation(
+    user_id: str,
+    checkpoint_dir: str = "checkpoints",
+) -> Optional[Dict[str, Any]]:
+    """
+    Accept the current pending recommendation: set is_onboarded=True and clear
+    recommendation_pending.
+
+    Args:
+        user_id: User ID (thread_id)
+        checkpoint_dir: Directory containing the checkpoint database
+
+    Returns:
+        Updated state dict if accepted, None if user not found or no pending recommendation
+    """
+    if not SQLITE_AVAILABLE:
+        return None
+
+    state = get_user_state(user_id, checkpoint_dir)
+    if not state:
+        return None
+
+    state["is_onboarded"] = True
+    state["recommendation_pending"] = False
+
+    if _save_state_to_checkpoint(user_id, state, checkpoint_dir):
+        return state
+    return None
 
 
 def delete_user(user_id: str, checkpoint_dir: str = "checkpoints") -> bool:

@@ -289,6 +289,64 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                     "rest_logged": True,
                 })
 
+            elif message_type == "REFINE_RECOMMENDATION":
+                # Re-run recommender with user feedback on the previous suggestion.
+                feedback = data.get("feedback", "").strip()
+                if not feedback:
+                    await websocket.send_json({
+                        "type": "ERROR",
+                        "message": "REFINE_RECOMMENDATION requires a non-empty 'feedback' field.",
+                    })
+                    continue
+
+                try:
+                    from graph import run_refine_recommendation
+
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None, lambda: run_refine_recommendation(user_id, feedback)
+                    )
+                    await websocket.send_json({
+                        "type": "RECOMMENDATION_UPDATE",
+                        "recommended_personas": result.get("recommended_personas", []),
+                        "subscribed_personas": result.get("subscribed_personas", []),
+                        "selected_persona": result.get("selected_persona"),
+                        "rationale": result.get("recommendation_rationale", ""),
+                        "recommendation_pending": True,
+                    })
+                except Exception as e:
+                    logger.error(f"REFINE_RECOMMENDATION error for {user_id}: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "type": "ERROR",
+                        "message": f"Failed to refine recommendation: {str(e)}",
+                    })
+
+            elif message_type == "ACCEPT_RECOMMENDATION":
+                # Accept the current pending recommendation and finalize onboarding.
+                try:
+                    from db_utils import accept_recommendation
+
+                    state = accept_recommendation(user_id)
+                    if state:
+                        await websocket.send_json({
+                            "type": "RECOMMENDATION_ACCEPTED",
+                            "is_onboarded": True,
+                            "selected_persona": state.get("selected_persona"),
+                            "subscribed_personas": state.get("subscribed_personas") or [],
+                            "recommended_personas": state.get("recommended_personas") or [],
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "ERROR",
+                            "message": "No pending recommendation to accept. Complete onboarding first.",
+                        })
+                except Exception as e:
+                    logger.error(f"ACCEPT_RECOMMENDATION error for {user_id}: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "type": "ERROR",
+                        "message": f"Failed to accept recommendation: {str(e)}",
+                    })
+
             elif message_type == "CHAT_MESSAGE":
                 # Conversational Q&A: answers questions without generating a workout.
                 # This is a lightweight path that does NOT touch the workout graph or
@@ -308,11 +366,14 @@ async def workout_websocket(websocket: WebSocket, user_id: str):
                     user_state = get_user_state(user_id) or {}
                     loop = asyncio.get_event_loop()
                     answer = await loop.run_in_executor(
-                        None, lambda: run_qa_standalone(user_state, question)
+                        None, lambda: run_qa_standalone(user_state, question, user_id=user_id)
                     )
+                    # Re-fetch state after potential command execution
+                    updated_state = get_user_state(user_id) or {}
                     await websocket.send_json({
                         "type": "CHAT_RESPONSE",
                         "answer": answer,
+                        "state": updated_state,
                     })
                 except Exception as e:
                     logger.error(f"CHAT_MESSAGE error for {user_id}: {e}", exc_info=True)
