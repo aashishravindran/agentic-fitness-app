@@ -228,42 +228,355 @@ agentic-fitness-app/
 - **[FITNESS_RAG_SPEC.md](./docs/FITNESS_RAG_SPEC.md)** - Original technical specification
 - **[PITCH_DECK.md](./docs/PITCH_DECK.md)** - 🎯 Pitch deck for non-technical audiences
 
-## API Endpoints
+## API Reference
+
+Base URL: `http://localhost:8000`
+
+### Health Check
+
+```bash
+curl http://localhost:8000/health
+# → {"status": "healthy"}
+```
+
+---
+
+### Onboarding a New User (Step-by-Step)
+
+The onboarding flow creates a user profile, runs the AI persona recommender, and finalizes the user's training setup. Follow these steps in order:
+
+#### Step 1: Intake — Submit profile and trigger persona recommendation
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/intake \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fitness_level": "Intermediate",
+    "about_me": "I train at home, want to lose fat and build muscle. I have 30 minutes per day.",
+    "equipment": ["dumbbells", "pull-up bar", "resistance bands"],
+    "height_cm": 178,
+    "weight_kg": 82
+  }'
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "recommendation_pending": true,
+  "recommended_personas": ["iron", "hiit"],
+  "subscribed_personas": ["iron", "hiit"],
+  "rationale": "Based on your fat loss and muscle building goals with limited time, Iron for strength and Inferno HIIT for metabolic conditioning are ideal...",
+  "workout_duration_minutes": 30,
+  "equipment": ["dumbbells", "pull-up bar", "resistance bands"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `fitness_level` | string | No | `"Beginner"`, `"Intermediate"`, or `"Advanced"` (default: `"Intermediate"`) |
+| `about_me` | string | No | Free-text context about lifestyle, goals, limitations |
+| `equipment` | string[] | No | Equipment available (e.g. `["dumbbells", "barbell", "yoga mat"]`) |
+| `height_cm` | float | No | Height in centimeters |
+| `weight_kg` | float | No | Weight in kilograms |
+
+#### Step 2 (Optional): Refine — Adjust the recommendation with feedback
+
+If the user doesn't like the recommendation, they can provide feedback to re-run the recommender:
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/refine-recommendation \
+  -H "Content-Type: application/json" \
+  -d '{"feedback": "I also want yoga for recovery days"}'
+```
+
+Response:
+```json
+{
+  "recommended_personas": ["iron", "yoga"],
+  "subscribed_personas": ["iron", "yoga"],
+  "rationale": "Updated recommendation incorporating yoga for active recovery...",
+  "recommendation_pending": true,
+  "workout_duration_minutes": 30
+}
+```
+
+This step can be repeated multiple times until the user is satisfied.
+
+#### Step 3: Accept — Finalize onboarding
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/accept-recommendation
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "is_onboarded": true,
+  "selected_persona": "iron",
+  "subscribed_personas": ["iron", "yoga"],
+  "recommended_personas": ["iron", "yoga"],
+  "rationale": "...",
+  "equipment": ["dumbbells", "pull-up bar", "resistance bands"],
+  "workout_duration_minutes": 30
+}
+```
+
+After this, the user is fully onboarded and can generate workouts.
+
+#### Step 4 (Optional): Manual persona selection
+
+If you want to override personas instead of using the recommender flow:
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/select-persona \
+  -H "Content-Type: application/json" \
+  -d '{"personas": ["iron", "hiit", "kickboxing"]}'
+```
+
+#### Alternative: Legacy onboard (biometrics only, no about_me)
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/onboard \
+  -H "Content-Type: application/json" \
+  -d '{
+    "height_cm": 178,
+    "weight_kg": 82,
+    "goal": "Build muscle and lose fat",
+    "fitness_level": "Intermediate"
+  }'
+```
+
+---
+
+### User Profile & Settings
+
+#### Get profile
+
+```bash
+curl http://localhost:8000/api/users/user123/profile
+```
+
+Response:
+```json
+{
+  "user_id": "user123",
+  "height_cm": 178,
+  "weight_kg": 82,
+  "fitness_level": "Intermediate",
+  "is_onboarded": true,
+  "selected_persona": "iron",
+  "subscribed_personas": ["iron", "yoga"],
+  "recommended_personas": ["iron", "yoga"],
+  "recommendation_rationale": "...",
+  "about_me": "I train at home...",
+  "equipment": ["dumbbells", "pull-up bar", "resistance bands"],
+  "workout_duration_minutes": 30
+}
+```
+
+#### Update settings
+
+```bash
+curl -X PATCH http://localhost:8000/api/users/user123/settings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "max_workouts_per_week": 5,
+    "fatigue_threshold": 0.85,
+    "equipment": ["dumbbells", "barbell", "bench"],
+    "workout_duration_minutes": 45,
+    "about_me": "Updated: now training at a gym"
+  }'
+```
+
+All fields are optional — only include what you want to change.
+
+#### Get weekly status
+
+```bash
+curl http://localhost:8000/api/users/user123/status
+```
+
+Response:
+```json
+{
+  "workouts_completed_this_week": 2,
+  "max_workouts_per_week": 5,
+  "fatigue_scores": {"legs": 0.4, "push": 0.3, "pull": 0.2, "cardio": 0.1},
+  "fatigue_threshold": 0.85,
+  "selected_persona": "iron",
+  "subscribed_personas": ["iron", "yoga"]
+}
+```
+
+---
+
+### Workout Flow (REST)
+
+#### 1. Generate a workout
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/workout \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Give me a leg day workout"}'
+```
+
+The supervisor automatically picks the best worker from your subscribed personas based on your message. The workout is constrained to your equipment and duration settings.
+
+#### 2. Log sets (while workout is active)
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/log-set \
+  -H "Content-Type: application/json" \
+  -d '{"exercise_id": "ex_abc123", "weight": 100, "reps": 8, "rpe": 7}'
+```
+
+You can also match by name: `{"exercise": "Barbell Squat", "weight": 100, "reps": 8, "rpe": 7}`
+
+#### 3. Finish the workout
+
+```bash
+curl -X POST http://localhost:8000/api/users/user123/finish-workout
+```
+
+This applies RPE-based fatigue, increments the weekly counter, and saves the session to history.
+
+#### Get workout history
+
+```bash
+curl http://localhost:8000/api/users/user123/history
+```
+
+---
+
+### Fatigue & Weekly Resets (REST)
+
+```bash
+# Reset all fatigue scores to 0
+curl -X POST http://localhost:8000/api/users/user123/reset-fatigue
+
+# Reset weekly workout counter to 0
+curl -X POST http://localhost:8000/api/users/user123/reset-workouts
+
+# Simulate a new week (triggers decay on next workout)
+curl -X POST http://localhost:8000/api/users/user123/new-week
+```
+
+---
 
 ### WebSocket: `/ws/workout/{user_id}`
 
-Real-time connection for workout sessions.
+The WebSocket provides real-time interaction for workout sessions and chat. Connect to:
 
-**Client Messages**:
-- `USER_INPUT`: `{"type": "USER_INPUT", "content": "Start leg day", "persona": "iron"}`
-- `LOG_SET`: `{"type": "LOG_SET", "data": {"exercise": "Squat", "weight": 225, "reps": 5, "rpe": 9}}`
-- `LOG_REST`: `{"type": "LOG_REST"}` - Log a rest day
-- `FINISH_WORKOUT`: `{"type": "FINISH_WORKOUT"}`
-- `RESET_FATIGUE`: `{"type": "RESET_FATIGUE"}` - Reset fatigue scores
-- `RESET_WORKOUTS`: `{"type": "RESET_WORKOUTS"}` - Reset weekly counter
+```
+ws://localhost:8000/ws/workout/{user_id}
+```
 
-**Server Messages**:
-- `AGENT_RESPONSE`: `{"type": "AGENT_RESPONSE", "state": {...}, "workout": {...}}`
-- `ERROR`: `{"type": "ERROR", "message": "..."}`
+On connect, the server sends the current state:
+```json
+{"type": "AGENT_RESPONSE", "state": {...}, "workout": null, "is_working_out": false}
+```
 
-### REST Endpoints
+#### Client Messages (send to server)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/users/{id}/onboard` | POST | Submit biometrics, trigger persona recommender |
-| `/api/users/{id}/select-persona` | POST | Subscribe to personas (body: `{"personas": ["iron","yoga"]}`) |
-| `/api/users/{id}/profile` | GET | Get biometric data and persona settings |
-| `/api/users/{id}/workout` | POST | Generate workout (body: `{"prompt": "I want a leg workout"}`) |
-| `/api/users/{id}/log-set` | POST | Log a set (body: `{"exercise":"Squat","weight":100,"reps":5,"rpe":8}`) |
-| `/api/users/{id}/finish-workout` | POST | Complete workout (applies fatigue, saves to history) |
-| `/api/users/{id}/reset-fatigue` | POST | Reset fatigue scores |
-| `/api/users/{id}/reset-workouts` | POST | Reset workouts_completed_this_week |
-| `/api/users/{id}/new-week` | POST | Simulate new week (triggers decay on next run) |
-| `/api/users/{id}/status` | GET | Weekly progress and fatigue |
-| `/api/users/{id}/history` | GET | Workout history |
-| `/api/users/{id}/settings` | PATCH | Update max_workouts_per_week, fatigue_threshold |
+| Type | Payload | Description |
+|------|---------|-------------|
+| `USER_INPUT` | `{"type":"USER_INPUT", "content":"Give me a leg workout"}` | Generate a workout (supervisor routes to best worker) |
+| `CHAT_MESSAGE` | `{"type":"CHAT_MESSAGE", "content":"How are my legs doing?"}` | Q&A or command (no workout generated) |
+| `LOG_SET` | `{"type":"LOG_SET", "data":{"exercise_id":"ex_abc","weight":100,"reps":8,"rpe":7}}` | Log a set during active workout |
+| `FINISH_WORKOUT` | `{"type":"FINISH_WORKOUT"}` | Finalize workout, apply fatigue |
+| `LOG_REST` | `{"type":"LOG_REST"}` | Log a rest day (reduces fatigue by 30%) |
+| `RESET_FATIGUE` | `{"type":"RESET_FATIGUE"}` | Reset all fatigue scores |
+| `RESET_WORKOUTS` | `{"type":"RESET_WORKOUTS"}` | Reset weekly workout counter |
+| `RESET_USER` | `{"type":"RESET_USER"}` | Delete all user data and start fresh |
+| `RESUME` | `{"type":"RESUME"}` | Resume graph after interruption |
+| `APPROVE_SUGGESTION` | `{"type":"APPROVE_SUGGESTION", "approved":true}` | Approve/reject agent suggestion |
+| `REFINE_RECOMMENDATION` | `{"type":"REFINE_RECOMMENDATION", "feedback":"I also want yoga"}` | Re-run recommender with feedback |
+| `ACCEPT_RECOMMENDATION` | `{"type":"ACCEPT_RECOMMENDATION"}` | Accept persona recommendation |
 
-**Workout flow**: Generate workout → graph interrupts with workout → optionally log sets → finish workout to apply fatigue and save. Same flow for REST and WebSocket.
+#### Server Messages (received from server)
+
+| Type | Description |
+|------|-------------|
+| `AGENT_RESPONSE` | Workout state update: `{state, workout, is_working_out, chat_response?, greeting_message?}` |
+| `CHAT_RESPONSE` | Q&A or command result: `{answer, state}` |
+| `RECOMMENDATION_UPDATE` | Updated persona recommendation after refine |
+| `RECOMMENDATION_ACCEPTED` | Confirmation after accepting recommendation |
+| `ERROR` | Error message: `{message}` |
+
+---
+
+### Chat as Command Hub
+
+The chat interface (`CHAT_MESSAGE` via WebSocket, or the QA agent) doubles as a command hub. Users can manage their settings through natural language:
+
+| Say this... | What happens |
+|-------------|-------------|
+| "Reset my fatigue" | All fatigue scores set to 0 |
+| "Reset workouts" / "Start fresh this week" | Weekly counter set to 0 |
+| "Increase workouts to 5" | `max_workouts_per_week` updated to 5 |
+| "I only have 20 minutes today" | `workout_duration_minutes` updated to 20 |
+| "I just got a barbell and a bench" | `equipment` list updated |
+| "Set fatigue threshold to 0.9" | `fatigue_threshold` updated to 0.9 |
+
+Example via WebSocket:
+```json
+{"type": "CHAT_MESSAGE", "content": "I just got a barbell and a bench"}
+```
+
+Response:
+```json
+{
+  "type": "CHAT_RESPONSE",
+  "answer": "Done! I've updated your equipment list to include a barbell and bench.",
+  "state": {"equipment": ["barbell", "bench"], "...": "..."}
+}
+```
+
+Pure questions (no state change) also work:
+```json
+{"type": "CHAT_MESSAGE", "content": "How are my legs doing?"}
+```
+
+---
+
+### Complete Example: Onboard + Workout + Chat
+
+```bash
+# 1. Onboard
+curl -X POST http://localhost:8000/api/users/alice/intake \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fitness_level": "Beginner",
+    "about_me": "New to fitness, want to get stronger",
+    "equipment": ["dumbbells", "yoga mat"]
+  }'
+
+# 2. Accept the AI recommendation
+curl -X POST http://localhost:8000/api/users/alice/accept-recommendation
+
+# 3. Check profile
+curl http://localhost:8000/api/users/alice/profile
+
+# 4. Generate a workout (REST)
+curl -X POST http://localhost:8000/api/users/alice/workout \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "I want a full body workout"}'
+
+# 5. Log a set
+curl -X POST http://localhost:8000/api/users/alice/log-set \
+  -H "Content-Type: application/json" \
+  -d '{"exercise": "Dumbbell Squat", "weight": 25, "reps": 10, "rpe": 6}'
+
+# 6. Finish
+curl -X POST http://localhost:8000/api/users/alice/finish-workout
+
+# 7. Check status after workout
+curl http://localhost:8000/api/users/alice/status
+```
+
+For real-time interaction (chat + workouts), use the WebSocket at `ws://localhost:8000/ws/workout/alice`.
 
 ## Database Management
 
