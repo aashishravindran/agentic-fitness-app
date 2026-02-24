@@ -102,9 +102,53 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 3. **Use the UI**: Point [SuperSetUI](https://github.com/aashishravindran/SuperSetUI) at `http://localhost:8000`, or use the CLI below.
 
-### CLI Interface
+### SuperSet CLI (AWS CLI-style)
 
-**Command-line interface for testing and development:**
+An AWS CLI-style tool that calls the REST API. Requires the backend to be running.
+
+```bash
+# Make it executable
+chmod +x superset
+
+# See all available endpoints
+./superset help
+
+# Configure defaults (saves to ~/.superset/config.json)
+./superset configure --url http://localhost:8000 --user alice
+
+# Onboard a user
+./superset users intake alice --fitness-level Beginner \
+  --about-me "I train at home" --equipment dumbbells,bands
+./superset users accept alice
+
+# Check profile and status
+./superset users profile alice
+./superset users status alice
+
+# Generate and complete a workout
+./superset workout generate alice --prompt "Give me a leg workout"
+./superset workout log-set alice --exercise "Squat" --weight 100 --reps 8 --rpe 7
+./superset workout finish alice
+./superset workout history alice
+
+# Update settings
+./superset users settings alice --max-workouts 5 --duration 45 --equipment dumbbells,barbell
+
+# Chat with Max (Q&A + commands)
+./superset chat alice "How are my legs doing?"
+./superset chat alice "Reset my fatigue"
+
+# Resets
+./superset reset fatigue alice
+./superset reset workouts alice
+
+# Any command with --json for raw output
+./superset users profile alice --json
+```
+
+### Internal CLI (main.py)
+
+**Direct graph/DB access for testing and development (no backend needed):**
 
 #### RAG System (Ingest + Query)
 

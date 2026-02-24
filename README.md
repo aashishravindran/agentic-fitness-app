@@ -102,36 +102,58 @@ A full-stack fitness coaching platform powered by LangGraph agents, featuring:
 
 3. **Use the UI**: Point [SuperSetUI](https://github.com/aashishravindran/SuperSetUI) at `http://localhost:8000`, or use the CLI below.
 
-### CLI Interface
+### SuperSet CLI (AWS CLI-style)
 
-**Command-line interface for testing and development:**
+An AWS CLI-style tool that calls the REST API. Requires the backend to be running.
 
-#### RAG System (Ingest + Query)
+```bash
+# Make it executable (one-time)
+chmod +x superset
 
-- **Ingest creator data**:
-  ```bash
-  python main.py ingest
-  ```
+# See all available endpoints
+./superset help
 
-- **Query RAG** (filtered by creator):
-  ```bash
-  python main.py query --creator coach_iron --query "How should I adjust training when fatigue is high?"
-  ```
+# Configure defaults (saves to ~/.superset/config.json)
+./superset configure --url http://localhost:8000 --user alice
 
-#### Interactive Chat CLI
+# Onboard a user
+./superset users intake alice --fitness-level Beginner \
+  --about-me "I train at home" --equipment dumbbells,bands
+./superset users accept alice
 
-- **Chat with the agent** (natural language):
-  ```bash
-  python main.py chat "I want a strength workout, my legs are a bit sore"
-  python main.py chat "Give me a yoga flow, my hips are tight"
-  python main.py chat "HIIT session please" --persona hiit
-  ```
+# Check profile and status
+./superset users profile alice
+./superset users status alice
 
-- **View user state**:
-  ```bash
-  python main.py db view <user_id>
-  python main.py db list
-  ```
+# Generate and complete a workout
+./superset workout generate alice --prompt "Give me a leg workout"
+./superset workout log-set alice --exercise "Squat" --weight 100 --reps 8 --rpe 7
+./superset workout finish alice
+./superset workout history alice
+
+# Update settings
+./superset users settings alice --max-workouts 5 --duration 45 --equipment dumbbells,barbell
+
+# Chat with Max (Q&A + commands)
+./superset chat alice "How are my legs doing?"
+./superset chat alice "Reset my fatigue"
+
+# Resets
+./superset reset fatigue alice
+./superset reset workouts alice
+
+# Any command with --json for raw output
+./superset users profile alice --json
+```
+
+### Internal CLI (main.py)
+
+**Direct graph/DB access for testing and development (no backend needed):**
+
+- **Ingest creator data**: `python main.py ingest`
+- **Query RAG**: `python main.py query --creator coach_iron --query "How should I adjust training?"`
+- **Chat**: `python main.py chat "I want a strength workout"`
+- **View users**: `python main.py db list` / `python main.py db view <user_id>`
 
 See **[QUICKSTART.md](./docs/QUICKSTART.md)** for detailed CLI instructions.
 

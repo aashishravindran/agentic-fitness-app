@@ -1,0 +1,591 @@
+#!/usr/bin/env python3
+"""
+SuperSet CLI — AWS CLI-style client for the SuperSet Fitness API.
+
+Usage:
+    superset <command> <action> [user_id] [--options]
+
+Examples:
+    superset health
+    superset help
+    superset configure --url http://localhost:8000 --user alice
+    superset users intake alice --fitness-level Beginner --about-me "I train at home"
+    superset workout generate alice --prompt "Leg day"
+    superset chat alice "Reset my fatigue"
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import httpx
+from rich.console import Console
+from rich.json import JSON
+from rich.panel import Panel
+from rich.table import Table
+
+console = Console()
+err_console = Console(stderr=True)
+
+CONFIG_DIR = Path.home() / ".superset"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+DEFAULT_BASE_URL = "http://localhost:8000"
+
+# ── All endpoints for `superset help` ────────────────────────────────────
+
+ENDPOINTS = [
+    ("health",            "GET",    "/health",                                "Health check"),
+    ("users intake",      "POST",   "/api/users/{id}/intake",                 "Onboard user (profile + persona recommendation)"),
+    ("users refine",      "POST",   "/api/users/{id}/refine-recommendation",  "Refine persona recommendation with feedback"),
+    ("users accept",      "POST",   "/api/users/{id}/accept-recommendation",  "Accept recommendation and finalize onboarding"),
+    ("users select",      "POST",   "/api/users/{id}/select-persona",         "Manually select personas"),
+    ("users profile",     "GET",    "/api/users/{id}/profile",                "Get user profile"),
+    ("users status",      "GET",    "/api/users/{id}/status",                 "Get weekly status and fatigue"),
+    ("users settings",    "PATCH",  "/api/users/{id}/settings",               "Update user settings"),
+    ("workout generate",  "POST",   "/api/users/{id}/workout",                "Generate a workout"),
+    ("workout log-set",   "POST",   "/api/users/{id}/log-set",                "Log a set during active workout"),
+    ("workout finish",    "POST",   "/api/users/{id}/finish-workout",         "Finish workout (apply fatigue, save history)"),
+    ("workout history",   "GET",    "/api/users/{id}/history",                "Get workout history"),
+    ("reset fatigue",     "POST",   "/api/users/{id}/reset-fatigue",          "Reset all fatigue scores to 0"),
+    ("reset workouts",    "POST",   "/api/users/{id}/reset-workouts",         "Reset weekly workout counter"),
+    ("reset week",        "POST",   "/api/users/{id}/new-week",               "Simulate new week"),
+    ("chat",              "POST",   "/api/users/{id}/workout",                "Chat / command hub (routes through supervisor)"),
+]
+
+
+# ── Config ───────────────────────────────────────────────────────────────
+
+def load_config() -> Dict[str, str]:
+    if CONFIG_FILE.exists():
+        return json.loads(CONFIG_FILE.read_text())
+    return {}
+
+
+def save_config(cfg: Dict[str, str]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+
+
+def get_base_url(args: argparse.Namespace) -> str:
+    url = getattr(args, "url", None)
+    if url:
+        return url.rstrip("/")
+    cfg = load_config()
+    return cfg.get("base_url", DEFAULT_BASE_URL).rstrip("/")
+
+
+def resolve_user(args: argparse.Namespace) -> str:
+    user_id = getattr(args, "user_id", None)
+    if user_id:
+        return user_id
+    cfg = load_config()
+    default = cfg.get("default_user")
+    if default:
+        return default
+    err_console.print(
+        "[red]No user specified.[/red] Pass user_id or run: "
+        "[bold]superset configure --user <id>[/bold]"
+    )
+    sys.exit(1)
+
+
+# ── HTTP helpers ─────────────────────────────────────────────────────────
+
+def api(method: str, url: str, body: Optional[Dict] = None, timeout: float = 120.0) -> Dict[str, Any]:
+    try:
+        r = httpx.request(method, url, json=body, timeout=timeout)
+    except httpx.ConnectError:
+        err_console.print(f"[red]Connection refused:[/red] {url}")
+        err_console.print("Is the backend running? Start with: python -m uvicorn backend.main:app --reload")
+        sys.exit(1)
+
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    if r.status_code >= 400:
+        detail = data.get("detail", r.text) if isinstance(data, dict) else r.text
+        err_console.print(f"[red]Error {r.status_code}:[/red] {detail}")
+        sys.exit(1)
+
+    return data
+
+
+def output(data: Any, args: argparse.Namespace) -> None:
+    """Print response — raw JSON if --json, else pretty."""
+    if getattr(args, "json_output", False):
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+    else:
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+
+
+# ── Pretty printers ─────────────────────────────────────────────────────
+
+def print_profile(data: Dict, args: argparse.Namespace) -> None:
+    if getattr(args, "json_output", False):
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+        return
+    table = Table(title="User Profile", show_lines=True)
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="white")
+    for key in [
+        "user_id", "fitness_level", "height_cm", "weight_kg",
+        "is_onboarded", "about_me",
+        "selected_persona", "subscribed_personas", "recommended_personas",
+        "equipment", "workout_duration_minutes",
+    ]:
+        val = data.get(key)
+        if val is not None:
+            display = ", ".join(val) if isinstance(val, list) else str(val)
+            table.add_row(key, display)
+    console.print(table)
+
+
+def print_status(data: Dict, args: argparse.Namespace) -> None:
+    if getattr(args, "json_output", False):
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+        return
+    table = Table(title="Weekly Status", show_lines=True)
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("Workouts", f"{data.get('workouts_completed_this_week', 0)} / {data.get('max_workouts_per_week', 4)}")
+    table.add_row("Fatigue Threshold", str(data.get("fatigue_threshold", 0.8)))
+    table.add_row("Personas", ", ".join(data.get("subscribed_personas", [])))
+    console.print(table)
+
+    fatigue = data.get("fatigue_scores", {})
+    if fatigue:
+        ft = Table(title="Fatigue Scores")
+        ft.add_column("Muscle Group", style="cyan")
+        ft.add_column("Score", style="white")
+        ft.add_column("Bar", style="yellow")
+        for k, v in sorted(fatigue.items(), key=lambda x: -x[1]):
+            bar = "#" * int(v * 20)
+            color = "green" if v < 0.4 else "yellow" if v < 0.7 else "red"
+            ft.add_row(k, f"{v:.0%}", f"[{color}]{bar}[/{color}]")
+        console.print(ft)
+
+
+def print_history(data: Dict, args: argparse.Namespace) -> None:
+    if getattr(args, "json_output", False):
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+        return
+    history = data.get("workout_history", [])
+    if not history:
+        console.print("[dim]No workouts logged yet.[/dim]")
+        return
+    table = Table(title=f"Workout History ({len(history)} sessions)")
+    table.add_column("#", style="dim")
+    table.add_column("Date", style="cyan")
+    table.add_column("Persona", style="magenta")
+    table.add_column("Focus", style="white")
+    for i, w in enumerate(history, 1):
+        table.add_row(
+            str(i),
+            w.get("date", "—"),
+            w.get("persona", "—"),
+            w.get("focus", w.get("focus_area", w.get("focus_system", "—"))),
+        )
+    console.print(table)
+
+
+def print_workout(data: Dict, args: argparse.Namespace) -> None:
+    if getattr(args, "json_output", False):
+        console.print(JSON(json.dumps(data, indent=2, default=str)))
+        return
+    workout = data.get("workout") or data.get("daily_workout")
+    if not workout:
+        console.print("[dim]No workout in response.[/dim]")
+        output(data, args)
+        return
+
+    focus = workout.get("focus_area") or workout.get("focus_system") or workout.get("focus_attribute") or "General"
+    console.print(Panel(f"[bold]{focus}[/bold]", title="Workout Generated", border_style="green"))
+
+    exercises = workout.get("exercises") or workout.get("poses") or workout.get("activities") or []
+    if exercises:
+        et = Table(title="Exercises")
+        et.add_column("#", style="dim")
+        et.add_column("Exercise", style="cyan")
+        et.add_column("Details", style="white")
+        et.add_column("ID", style="dim")
+        for i, ex in enumerate(exercises, 1):
+            name = ex.get("exercise_name") or ex.get("pose_name") or ex.get("activity_name") or "—"
+            details_parts = []
+            if ex.get("sets"):
+                details_parts.append(f"{ex['sets']}x{ex.get('reps', '?')}")
+            if ex.get("duration"):
+                details_parts.append(ex["duration"])
+            if ex.get("work_duration"):
+                details_parts.append(f"{ex['work_duration']} work / {ex.get('rest_duration', '?')} rest")
+            if ex.get("rounds"):
+                details_parts.append(f"{ex['rounds']} rounds")
+            et.add_row(str(i), name, " | ".join(details_parts) or "—", ex.get("id", "—"))
+        console.print(et)
+
+    rationale = workout.get("overall_rationale")
+    if rationale:
+        console.print(Panel(rationale, title="Rationale", border_style="dim"))
+
+
+# ── Command handlers ─────────────────────────────────────────────────────
+
+def cmd_health(args: argparse.Namespace) -> None:
+    data = api("GET", f"{get_base_url(args)}/health")
+    console.print(f"[green]Healthy[/green] — {data}")
+
+
+def cmd_help(args: argparse.Namespace) -> None:
+    table = Table(title="SuperSet CLI — API Reference", show_lines=True, title_style="bold cyan")
+    table.add_column("Command", style="cyan", min_width=20)
+    table.add_column("Method", style="magenta", min_width=6)
+    table.add_column("Endpoint", style="white", min_width=38)
+    table.add_column("Description", style="dim")
+    for cmd, method, endpoint, desc in ENDPOINTS:
+        color = {"GET": "green", "POST": "yellow", "PATCH": "blue"}.get(method, "white")
+        table.add_row(cmd, f"[{color}]{method}[/{color}]", endpoint, desc)
+    console.print(table)
+    console.print("\n[dim]Run any command with [bold]--json[/bold] for raw JSON output.[/dim]")
+    console.print("[dim]Run [bold]superset configure --url URL --user ID[/bold] to set defaults.[/dim]")
+
+
+def cmd_configure(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    if args.url:
+        cfg["base_url"] = args.url.rstrip("/")
+    if args.user:
+        cfg["default_user"] = args.user
+    save_config(cfg)
+    console.print(f"[green]Config saved:[/green] {CONFIG_FILE}")
+    for k, v in cfg.items():
+        console.print(f"  {k}: {v}")
+
+
+# ── Users ────────────────────────────────────────────────────────────────
+
+def cmd_users_intake(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    body: Dict[str, Any] = {}
+    if args.fitness_level:
+        body["fitness_level"] = args.fitness_level
+    if args.about_me:
+        body["about_me"] = args.about_me
+    if args.equipment:
+        body["equipment"] = [e.strip() for e in args.equipment.split(",")]
+    if args.height:
+        body["height_cm"] = args.height
+    if args.weight:
+        body["weight_kg"] = args.weight
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/intake", body)
+    console.print(f"[green]Intake complete for {user_id}[/green]")
+    personas = data.get("recommended_personas", [])
+    console.print(f"  Recommended personas: [cyan]{', '.join(personas)}[/cyan]")
+    console.print(f"  Duration: [cyan]{data.get('workout_duration_minutes', '—')} min[/cyan]")
+    console.print(f"  Rationale: {data.get('rationale', '—')}")
+    console.print(f"\n[dim]Next: superset users accept {user_id}[/dim]")
+
+
+def cmd_users_refine(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/refine-recommendation",
+               {"feedback": args.feedback})
+    console.print(f"[green]Recommendation refined for {user_id}[/green]")
+    console.print(f"  Personas: [cyan]{', '.join(data.get('recommended_personas', []))}[/cyan]")
+    console.print(f"  Rationale: {data.get('rationale', '—')}")
+
+
+def cmd_users_accept(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/accept-recommendation")
+    console.print(f"[green]Onboarding complete for {user_id}[/green]")
+    console.print(f"  Subscribed: [cyan]{', '.join(data.get('subscribed_personas', []))}[/cyan]")
+
+
+def cmd_users_select(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    personas = [p.strip() for p in args.personas.split(",")]
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/select-persona",
+               {"personas": personas})
+    console.print(f"[green]Personas updated for {user_id}:[/green] {', '.join(data.get('subscribed_personas', []))}")
+
+
+def cmd_users_profile(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("GET", f"{get_base_url(args)}/api/users/{user_id}/profile")
+    print_profile(data, args)
+
+
+def cmd_users_status(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("GET", f"{get_base_url(args)}/api/users/{user_id}/status")
+    print_status(data, args)
+
+
+def cmd_users_settings(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    body: Dict[str, Any] = {}
+    if args.max_workouts is not None:
+        body["max_workouts_per_week"] = args.max_workouts
+    if args.threshold is not None:
+        body["fatigue_threshold"] = args.threshold
+    if args.duration is not None:
+        body["workout_duration_minutes"] = args.duration
+    if args.equipment:
+        body["equipment"] = [e.strip() for e in args.equipment.split(",")]
+    if args.about_me:
+        body["about_me"] = args.about_me
+    if not body:
+        err_console.print("[yellow]No settings provided. Use --max-workouts, --threshold, --duration, --equipment, or --about-me[/yellow]")
+        sys.exit(1)
+    data = api("PATCH", f"{get_base_url(args)}/api/users/{user_id}/settings", body)
+    console.print(f"[green]Settings updated for {user_id}[/green]")
+    output(data, args)
+
+
+# ── Workout ──────────────────────────────────────────────────────────────
+
+def cmd_workout_generate(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    body: Dict[str, Any] = {"prompt": args.prompt}
+    if args.goal:
+        body["goal"] = args.goal
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/workout", body)
+    print_workout(data, args)
+
+
+def cmd_workout_log_set(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    body: Dict[str, Any] = {
+        "weight": args.weight,
+        "reps": args.reps,
+        "rpe": args.rpe,
+    }
+    if args.exercise_id:
+        body["exercise_id"] = args.exercise_id
+    elif args.exercise:
+        body["exercise"] = args.exercise
+    else:
+        err_console.print("[red]Provide --exercise or --exercise-id[/red]")
+        sys.exit(1)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/log-set", body)
+    console.print(f"[green]Set logged:[/green] {args.exercise or args.exercise_id} — {args.weight}lb x {args.reps} @ RPE {args.rpe}")
+
+
+def cmd_workout_finish(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/finish-workout")
+    console.print(f"[green]Workout finished for {user_id}[/green]")
+    output(data, args)
+
+
+def cmd_workout_history(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("GET", f"{get_base_url(args)}/api/users/{user_id}/history")
+    print_history(data, args)
+
+
+# ── Reset ────────────────────────────────────────────────────────────────
+
+def cmd_reset_fatigue(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/reset-fatigue")
+    console.print(f"[green]Fatigue reset for {user_id}[/green]")
+
+
+def cmd_reset_workouts(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/reset-workouts")
+    console.print(f"[green]Weekly counter reset for {user_id}[/green]")
+
+
+def cmd_reset_week(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/new-week")
+    console.print(f"[green]New week simulated for {user_id}[/green]")
+
+
+# ── Chat ─────────────────────────────────────────────────────────────────
+
+def cmd_chat(args: argparse.Namespace) -> None:
+    user_id = resolve_user(args)
+    message = args.message
+    data = api("POST", f"{get_base_url(args)}/api/users/{user_id}/workout",
+               {"prompt": message})
+    # If the supervisor routed to QA, chat_response is in state
+    state = data.get("state", {})
+    chat = state.get("chat_response") or data.get("chat_response")
+    if chat:
+        console.print(Panel(chat, title="Max", border_style="cyan"))
+    else:
+        # Supervisor generated a workout instead of chatting
+        print_workout(data, args)
+
+
+# ── Argparse setup ───────────────────────────────────────────────────────
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="superset",
+        description="SuperSet CLI — AWS CLI-style client for the SuperSet Fitness API",
+    )
+    parser.add_argument("--url", help="Backend URL (default: from config or http://localhost:8000)")
+    parser.add_argument("--json", dest="json_output", action="store_true", help="Output raw JSON")
+
+    sub = parser.add_subparsers(dest="command")
+
+    # health
+    sub.add_parser("health", help="Check backend health")
+
+    # help
+    sub.add_parser("help", help="Show all API endpoints")
+
+    # configure
+    p_cfg = sub.add_parser("configure", help="Set default URL and user")
+    p_cfg.add_argument("--url", dest="url", help="Backend URL")
+    p_cfg.add_argument("--user", help="Default user ID")
+
+    # ── users ────────────────────────────────────────────────────────
+    p_users = sub.add_parser("users", help="User management")
+    users_sub = p_users.add_subparsers(dest="action")
+
+    p_intake = users_sub.add_parser("intake", help="Onboard user")
+    p_intake.add_argument("user_id", nargs="?", help="User ID")
+    p_intake.add_argument("--fitness-level", default="Intermediate")
+    p_intake.add_argument("--about-me", help="Free-text about the user")
+    p_intake.add_argument("--equipment", help="Comma-separated equipment list")
+    p_intake.add_argument("--height", type=float, help="Height in cm")
+    p_intake.add_argument("--weight", type=float, help="Weight in kg")
+
+    p_refine = users_sub.add_parser("refine", help="Refine recommendation")
+    p_refine.add_argument("user_id", nargs="?", help="User ID")
+    p_refine.add_argument("--feedback", required=True, help="Feedback text")
+
+    p_accept = users_sub.add_parser("accept", help="Accept recommendation")
+    p_accept.add_argument("user_id", nargs="?", help="User ID")
+
+    p_select = users_sub.add_parser("select", help="Select personas manually")
+    p_select.add_argument("user_id", nargs="?", help="User ID")
+    p_select.add_argument("--personas", required=True, help="Comma-separated persona list")
+
+    p_profile = users_sub.add_parser("profile", help="Get user profile")
+    p_profile.add_argument("user_id", nargs="?", help="User ID")
+
+    p_status = users_sub.add_parser("status", help="Get weekly status")
+    p_status.add_argument("user_id", nargs="?", help="User ID")
+
+    p_settings = users_sub.add_parser("settings", help="Update settings")
+    p_settings.add_argument("user_id", nargs="?", help="User ID")
+    p_settings.add_argument("--max-workouts", type=int, help="Max workouts per week")
+    p_settings.add_argument("--threshold", type=float, help="Fatigue threshold (0.0-1.0)")
+    p_settings.add_argument("--duration", type=int, help="Workout duration in minutes")
+    p_settings.add_argument("--equipment", help="Comma-separated equipment list")
+    p_settings.add_argument("--about-me", help="About me text")
+
+    # ── workout ──────────────────────────────────────────────────────
+    p_workout = sub.add_parser("workout", help="Workout management")
+    workout_sub = p_workout.add_subparsers(dest="action")
+
+    p_gen = workout_sub.add_parser("generate", help="Generate a workout")
+    p_gen.add_argument("user_id", nargs="?", help="User ID")
+    p_gen.add_argument("--prompt", required=True, help="Workout request")
+    p_gen.add_argument("--goal", help="Override goal")
+
+    p_log = workout_sub.add_parser("log-set", help="Log a set")
+    p_log.add_argument("user_id", nargs="?", help="User ID")
+    p_log.add_argument("--exercise", help="Exercise name")
+    p_log.add_argument("--exercise-id", help="Exercise ID")
+    p_log.add_argument("--weight", type=float, required=True, help="Weight")
+    p_log.add_argument("--reps", type=int, required=True, help="Reps")
+    p_log.add_argument("--rpe", type=int, default=5, help="RPE (1-10)")
+
+    p_finish = workout_sub.add_parser("finish", help="Finish workout")
+    p_finish.add_argument("user_id", nargs="?", help="User ID")
+
+    p_hist = workout_sub.add_parser("history", help="Get workout history")
+    p_hist.add_argument("user_id", nargs="?", help="User ID")
+
+    # ── reset ────────────────────────────────────────────────────────
+    p_reset = sub.add_parser("reset", help="Reset operations")
+    reset_sub = p_reset.add_subparsers(dest="action")
+
+    p_rf = reset_sub.add_parser("fatigue", help="Reset fatigue scores")
+    p_rf.add_argument("user_id", nargs="?", help="User ID")
+
+    p_rw = reset_sub.add_parser("workouts", help="Reset weekly counter")
+    p_rw.add_argument("user_id", nargs="?", help="User ID")
+
+    p_rwk = reset_sub.add_parser("week", help="Simulate new week")
+    p_rwk.add_argument("user_id", nargs="?", help="User ID")
+
+    # ── chat ─────────────────────────────────────────────────────────
+    p_chat = sub.add_parser("chat", help="Chat with Max (Q&A + commands)")
+    p_chat.add_argument("user_id", nargs="?", help="User ID")
+    p_chat.add_argument("message", help="Message to send")
+
+    return parser
+
+
+# ── Dispatch ─────────────────────────────────────────────────────────────
+
+DISPATCH = {
+    ("health", None): cmd_health,
+    ("help", None): cmd_help,
+    ("configure", None): cmd_configure,
+    ("users", "intake"): cmd_users_intake,
+    ("users", "refine"): cmd_users_refine,
+    ("users", "accept"): cmd_users_accept,
+    ("users", "select"): cmd_users_select,
+    ("users", "profile"): cmd_users_profile,
+    ("users", "status"): cmd_users_status,
+    ("users", "settings"): cmd_users_settings,
+    ("workout", "generate"): cmd_workout_generate,
+    ("workout", "log-set"): cmd_workout_log_set,
+    ("workout", "finish"): cmd_workout_finish,
+    ("workout", "history"): cmd_workout_history,
+    ("reset", "fatigue"): cmd_reset_fatigue,
+    ("reset", "workouts"): cmd_reset_workouts,
+    ("reset", "week"): cmd_reset_week,
+    ("chat", None): cmd_chat,
+}
+
+
+def main() -> None:
+    # Handle --json anywhere in the command (argparse doesn't propagate parent flags to subcommands)
+    json_output = "--json" in sys.argv
+    if json_output:
+        sys.argv.remove("--json")
+
+    parser = build_parser()
+    args = parser.parse_args()
+    args.json_output = json_output
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+
+    action = getattr(args, "action", None)
+    key = (args.command, action)
+
+    # For chat, the message is a positional arg, not an action
+    if args.command == "chat":
+        key = ("chat", None)
+
+    handler = DISPATCH.get(key)
+    if not handler:
+        if args.command in ("users", "workout", "reset") and not action:
+            # Print subcommand help
+            parser.parse_args([args.command, "--help"])
+        else:
+            err_console.print(f"[red]Unknown command:[/red] {args.command} {action or ''}")
+        sys.exit(1)
+
+    handler(args)
+
+
+if __name__ == "__main__":
+    main()
