@@ -7,15 +7,14 @@ Covers:
 - Log-set by exercise_id and by exercise name
 - Finish-workout: resumes graph, runs finalize, clears daily_workout, saves to history
 
-Run from project root (requires: pip install -r requirements.txt, ingest, LLM configured):
+Run from project root (requires: pip install -r requirements.txt):
   python -m pytest tests/test_e2e_workout_flow.py -v
-  python -m pytest tests/test_e2e_workout_flow.py -v -s  # show print output
-  python tests/test_e2e_workout_flow.py  # run as script
 """
 
 import sys
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -32,6 +31,57 @@ except ImportError:
 
 def _unique_user() -> str:
     return f"e2e_{int(time.time() * 1000)}"
+
+
+# Canned recommender output (no LLM)
+def _mock_recommender_node(state):
+    return {
+        "recommended_personas": ["coach_iron"],
+        "recommended_persona": "coach_iron",
+        "recommendation_rationale": "Mock recommendation for e2e test.",
+        "subscribed_personas": ["iron"],
+        "is_onboarded": True,
+        "selected_persona": "iron",
+        "selected_creator": "coach_iron",
+    }
+
+
+# Canned workout output (no LLM)
+def _mock_iron_worker(state):
+    from agents.workout_utils import inject_exercise_ids
+
+    workout_dict = inject_exercise_ids({
+        "focus_area": "Legs",
+        "total_exercises": 2,
+        "exercises": [
+            {"exercise_name": "Barbell Squat", "sets": 3, "reps": "5", "tempo_notes": "Controlled", "iron_justification": "Test"},
+            {"exercise_name": "Romanian Deadlift", "sets": 3, "reps": "8", "tempo_notes": "Controlled", "iron_justification": "Test"},
+        ],
+        "fatigue_adaptations": None,
+        "overall_rationale": "Mock workout for e2e test.",
+    })
+    return {
+        "daily_workout": workout_dict,
+        "active_philosophy": "Mock philosophy",
+        "current_workout": str(workout_dict),
+        "is_working_out": True,
+    }
+
+
+@pytest.fixture
+def client():
+    """FastAPI TestClient with mocked LLM flows."""
+    with (
+        patch("feature_flags.ENABLE_PERSONA_RECOMMENDER", True),
+        patch("graph.persona_recommendation_node", _mock_recommender_node),
+        patch("graph.iron_worker", _mock_iron_worker),
+        patch("graph.yoga_worker", _mock_iron_worker),
+        patch("graph.hiit_worker", _mock_iron_worker),
+        patch("graph.kb_worker", _mock_iron_worker),
+    ):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        yield TestClient(app)
 
 
 def _ensure_onboarded(client, user_id: str):
@@ -57,16 +107,12 @@ def _ensure_onboarded(client, user_id: str):
     assert select_resp.status_code == 200, f"Select persona failed: {select_resp.text}"
 
 
-def test_workout_flow_exercise_ids_interrupt_log_finish():
+def test_workout_flow_exercise_ids_interrupt_log_finish(client):
     """
     Full e2e: onboard -> generate workout -> verify exercise IDs -> log by id -> log by name -> finish.
     """
-    from fastapi.testclient import TestClient
-
-    from backend.main import app
     from db_utils import delete_user, get_user_state
 
-    client = TestClient(app)
     user_id = _unique_user()
 
     try:
@@ -137,14 +183,10 @@ def test_workout_flow_exercise_ids_interrupt_log_finish():
         delete_user(user_id)
 
 
-def test_log_set_requires_exercise_or_id():
+def test_log_set_requires_exercise_or_id(client):
     """Log-set returns 400 when neither exercise nor exercise_id provided."""
-    from fastapi.testclient import TestClient
-
-    from backend.main import app
     from db_utils import delete_user
 
-    client = TestClient(app)
     user_id = _unique_user()
 
     try:
@@ -165,14 +207,10 @@ def test_log_set_requires_exercise_or_id():
         delete_user(user_id)
 
 
-def test_log_set_invalid_exercise_id():
+def test_log_set_invalid_exercise_id(client):
     """Log-set returns 400 when exercise_id not found in workout."""
-    from fastapi.testclient import TestClient
-
-    from backend.main import app
     from db_utils import delete_user
 
-    client = TestClient(app)
     user_id = _unique_user()
 
     try:
@@ -196,14 +234,10 @@ if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("E2E Workout Flow Tests")
     print("=" * 70)
-    print("Requires: LLM (Gemini/Ollama), ingest, ENABLE_PERSONA_RECOMMENDER=True")
+    print("Uses mocked workers — no LLM required")
     print("=" * 70 + "\n")
 
     if pytest:
         sys.exit(pytest.main([__file__, "-v", "-s"]))
     else:
-        # Run without pytest
-        test_workout_flow_exercise_ids_interrupt_log_finish()
-        test_log_set_requires_exercise_or_id()
-        test_log_set_invalid_exercise_id()
-        print("\n✅ All E2E tests passed")
+        print("Run with: pytest tests/test_e2e_workout_flow.py -v")

@@ -23,6 +23,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure project root is on path (tests/ is one level below root)
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -33,6 +35,7 @@ from agents.trainer import trainer_node
 from state import FitnessState
 
 
+@pytest.mark.asyncio
 async def test_trainer():
     """Test the trainer agent with sample state."""
     # Sample state matching FitnessState TypedDict

@@ -137,6 +137,17 @@ python main.py db update-fatigue <user_id> "legs:0.5,push:0.3"
 python main.py db new-week <user_id>  # Simulate week reset
 ```
 
+## Testing Workflow
+
+After creating or modifying any feature, always validate by running the test suite:
+
+```bash
+# Run all tests (from project root)
+pytest tests/ -v
+```
+
+When asked to "test this out", run `pytest tests/` to verify all tests pass. The e2e and integration tests use mocked workers (no LLM required). Only `test_graph.py` and `test_trainer.py` require a live LLM.
+
 ## Adding a New Persona
 
 1. Create `creators/<creator_name>.md` with the training philosophy.
